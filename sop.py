@@ -140,35 +140,22 @@ def draw_parallelogram_shape(c, x, y, w, h, text, font_size=7):
 # ─── Draw a single table row with SELECTIVE borders ───────────────────────────
 def draw_row_cells(c, XS, FLOW_COL_IDX, row_y, row_h,
                    is_first_row, is_last_row, total_rows):
-    """
-    Draw the 6 cells of a process step row.
-    - Side columns (not flow): full rect border
-    - Flow column: only LEFT and RIGHT vertical borders drawn;
-                   top border only on first row, bottom border only on last row.
-      This removes the horizontal lines inside the flow column between steps.
-    """
     c.setLineWidth(0.5)
     c.setStrokeColor(colors.black)
 
     for i in range(6):
-        x    = XS[i]
-        w    = XS[i+1] - XS[i]
+        x = XS[i]
+        w = XS[i+1] - XS[i]
         if i == FLOW_COL_IDX:
-            # Flow column — draw manually to skip interior h-lines
             c.setFillColor(colors.white)
-            c.rect(x, row_y, w, row_h, fill=1, stroke=0)   # fill, no stroke
-            # Left vertical
+            c.rect(x, row_y, w, row_h, fill=1, stroke=0)
             c.line(x, row_y, x, row_y + row_h)
-            # Right vertical
             c.line(x + w, row_y, x + w, row_y + row_h)
-            # Top horizontal — only for first row
             if is_first_row:
                 c.line(x, row_y + row_h, x + w, row_y + row_h)
-            # Bottom horizontal — only for last row
             if is_last_row:
                 c.line(x, row_y, x + w, row_y)
         else:
-            # All other columns — normal full rect
             c.setFillColor(colors.white)
             c.rect(x, row_y, w, row_h, fill=1, stroke=1)
 
@@ -192,16 +179,18 @@ def generate_pdf(steps, meta):
     right_w  = 83 * mm
     centre_w = TW - left_w - right_w
 
-    # Company name
+    # Company name block (left)
     c.setFont("Helvetica-Bold", 11)
     c.setFillColor(colors.black)
     c.drawString(ML, cur_y - 7, meta["company_name"])
+
+    # eka logo text with blue color
     c.setFont("Helvetica-Bold", 10)
     c.setFillColor(colors.HexColor("#1a6dcc"))
     c.drawString(ML, cur_y - 18, "eka")
     c.setFillColor(colors.black)
 
-    # Centre title
+    # Centre title block
     cx_title = ML + left_w + centre_w / 2
     c.setFont("Helvetica-Bold", 13)
     c.drawCentredString(cx_title, cur_y - 7, "STANDARD OPERATING PROCEDURE")
@@ -275,7 +264,6 @@ def generate_pdf(steps, meta):
     COL_MEAS = 28 * mm
     COL_FLOW = TW - COL_IN - COL_OUT - COL_RESP - COL_DOC - COL_MEAS
 
-    # Column index of flow column = 1
     FLOW_COL_IDX = 1
 
     XS = [
@@ -326,11 +314,8 @@ def generate_pdf(steps, meta):
     }
     V_PAD = 6 * mm
 
-    # Track the top of the flow column (for the outer left/right borders later)
     flow_section_top = cur_y
     total_steps = len(steps)
-
-    # We'll collect all row tops/bottoms to draw the flow column border last
     row_tops = []
 
     for idx, step in enumerate(steps):
@@ -343,11 +328,9 @@ def generate_pdf(steps, meta):
         is_first = (idx == 0)
         is_last  = (idx == total_steps - 1)
 
-        # Draw cells with selective borders
         draw_row_cells(c, XS, FLOW_COL_IDX, ry, ROW_H,
                        is_first, is_last, total_steps)
 
-        # Side column text
         def side_text(col_i, txt):
             if txt:
                 cw = XS[col_i+1] - XS[col_i]
@@ -361,24 +344,21 @@ def generate_pdf(steps, meta):
         side_text(4, step["doc_format"])
         side_text(5, step["measurement"])
 
-        # Shape geometry
         sh_w      = COL_FLOW * 0.78
         sh_x      = FLOW_CX - sh_w / 2
         shape_bot = ry + V_PAD
         shape_top_y = shape_bot + sh_h
         shape_mid = shape_bot + sh_h / 2
 
-        # Arrow from previous row bottom → top of this shape
         if idx > 0:
             prev_ry, prev_rh = row_tops[idx - 1]
-            arr_from = prev_ry            # bottom of previous row
+            arr_from = prev_ry
             if shape == "diamond":
                 arr_to = shape_mid + sh_h/2 + 1
             else:
                 arr_to = shape_top_y + 1
             draw_arrow_down(c, FLOW_CX, arr_from, arr_to)
 
-        # Draw shape
         if shape == "rect":
             draw_rect_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
         elif shape == "oval":
