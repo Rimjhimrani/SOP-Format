@@ -137,43 +137,49 @@ def draw_parallelogram_shape(c, x, y, w, h, text, font_size=7):
     c.drawPath(p, fill=1, stroke=1)
     draw_centered_text(c, text, x + w / 2, y + h / 2, w - 10, font_size=font_size)
 
-# ─── Draw a single table row — side cols only, flow col done separately ───────
-def draw_row_cells(c, XS, FLOW_COL_IDX, row_y, row_h,
-                   is_first_row, is_last_row, total_rows):
+# ─── Table drawing helpers ────────────────────────────────────────────────────
+def draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_bottoms):
     """
-    Draw borders for all columns EXCEPT the flow column.
-    Flow column background is filled white but no stroke — borders drawn
-    as one seamless block via draw_flow_column_block() after all rows.
-    """
-    c.setLineWidth(0.5)
-    c.setStrokeColor(colors.black)
+    Draw the entire process-steps table in ONE pass with clean borders:
 
-    for i in range(6):
-        if i == FLOW_COL_IDX:
-            # Fill white only — no borders, handled by draw_flow_column_block
-            c.setFillColor(colors.white)
-            c.rect(XS[i], row_y, XS[i+1] - XS[i], row_h, fill=1, stroke=0)
-        else:
-            x = XS[i]
-            w = XS[i+1] - XS[i]
-            c.setFillColor(colors.white)
-            c.setStrokeColor(colors.black)
-            c.rect(x, row_y, w, row_h, fill=1, stroke=1)
-
-
-def draw_flow_column_block(c, XS, FLOW_COL_IDX, top_y, bottom_y):
+    Strategy:
+    - Fill full table area white
+    - Draw outer border as one rect
+    - Draw vertical column dividers top-to-bottom (no interruptions)
+    - Draw horizontal row dividers ONLY for the side columns (not flow col)
+    - Flow column stays uncut — seamless vertical channel
     """
-    Draw the flow column as ONE solid rectangle spanning all step rows.
-    This ensures zero horizontal lines appear inside the flow column.
-    """
-    x = XS[FLOW_COL_IDX]
-    w = XS[FLOW_COL_IDX + 1] - x
+    ML_x    = XS[0]
+    total_w = XS[-1] - XS[0]
+    total_h = table_top - table_bottom
+
+    # 1. White fill entire table area
+    c.setFillColor(colors.white)
+    c.rect(ML_x, table_bottom, total_w, total_h, fill=1, stroke=0)
+
+    # 2. Outer border
     c.setStrokeColor(colors.black)
     c.setLineWidth(0.8)
-    c.line(x,     bottom_y, x,     top_y)    # left
-    c.line(x + w, bottom_y, x + w, top_y)    # right
-    c.line(x,     top_y,    x + w, top_y)    # top
-    c.line(x,     bottom_y, x + w, bottom_y) # bottom
+    c.rect(ML_x, table_bottom, total_w, total_h, fill=0, stroke=1)
+
+    # 3. Vertical column dividers (full height, top to bottom)
+    c.setLineWidth(0.5)
+    for x in XS[1:-1]:   # interior vertical lines only
+        c.line(x, table_bottom, x, table_top)
+
+    # 4. Horizontal row separators — ONLY between side columns, skip flow col
+    flow_x1 = XS[FLOW_COL_IDX]
+    flow_x2 = XS[FLOW_COL_IDX + 1]
+
+    c.setLineWidth(0.4)
+    for row_bottom in row_bottoms[:-1]:   # all except last (already covered by outer border)
+        y = row_bottom
+        # Left side columns (indices 0 .. FLOW_COL_IDX-1)
+        if FLOW_COL_IDX > 0:
+            c.line(XS[0], y, XS[FLOW_COL_IDX], y)
+        # Right side columns (indices FLOW_COL_IDX+1 .. end)
+        if FLOW_COL_IDX < 5:
+            c.line(XS[FLOW_COL_IDX + 1], y, XS[-1], y)
 
 
 # ─── PDF Generation ───────────────────────────────────────────────────────────
@@ -330,23 +336,26 @@ def generate_pdf(steps, meta):
     }
     V_PAD = 6 * mm
 
-    flow_section_top = cur_y   # top of flow column (below header row 2)
+    table_top   = cur_y   # top of data rows (just below col header)
     total_steps = len(steps)
-    row_tops = []              # (row_bottom_y, row_h) for each step
 
-    # ── PASS 1: draw side-column cells and collect geometry ──────────────────
+    # ── PASS 1: calculate all row geometries ─────────────────────────────────
+    row_data = []   # list of (row_bottom_y, row_h, step)
     scan_y = cur_y
-    for idx, step in enumerate(steps):
-        shape = step["shape"]
-        sh_h  = SHAPE_H.get(shape, 9 * mm)
+    for step in steps:
+        sh_h  = SHAPE_H.get(step["shape"], 9 * mm)
         ROW_H = sh_h + 2 * V_PAD
         ry    = scan_y - ROW_H
-        row_tops.append((ry, ROW_H))
+        row_data.append((ry, ROW_H, step))
+        scan_y = ry
+    table_bottom = scan_y   # bottom of last row
 
-        # Draw all side columns (flow col gets white fill, no stroke)
-        draw_row_cells(c, XS, FLOW_COL_IDX, ry, ROW_H, False, False, total_steps)
+    # ── PASS 2: draw table structure (clean, no interior flow-col lines) ─────
+    row_bottoms = [rd[0] for rd in row_data]
+    draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_bottoms)
 
-        # Side column text
+    # ── PASS 3: side-column text ──────────────────────────────────────────────
+    for (ry, ROW_H, step) in row_data:
         for col_i, key in [(0, "input_label"), (2, "output_label"),
                            (3, "responsible"), (4, "doc_format"), (5, "measurement")]:
             txt = step.get(key, "")
@@ -354,34 +363,26 @@ def generate_pdf(steps, meta):
                 cw = XS[col_i+1] - XS[col_i]
                 draw_centered_text(c, txt, XS[col_i]+cw/2, ry+ROW_H/2, cw-4, font_size=6.5)
 
-        scan_y = ry
-
-    flow_section_bottom = scan_y  # bottom of last row
-
-    # ── PASS 2: draw flow column as ONE seamless block (no interior h-lines) ─
-    draw_flow_column_block(c, XS, FLOW_COL_IDX, flow_section_top, flow_section_bottom)
-
-    # ── PASS 3: draw arrows and shapes on top ────────────────────────────────
+    # ── PASS 4: arrows and shapes on top ─────────────────────────────────────
     sh_w = COL_FLOW * 0.78
     sh_x = FLOW_CX - sh_w / 2
 
-    for idx, step in enumerate(steps):
-        shape = step["shape"]
-        sh_h  = SHAPE_H.get(shape, 9 * mm)
-        ry, ROW_H = row_tops[idx]
-
+    for idx, (ry, ROW_H, step) in enumerate(row_data):
+        shape       = step["shape"]
+        sh_h        = SHAPE_H.get(shape, 9 * mm)
         shape_bot   = ry + V_PAD
         shape_top_y = shape_bot + sh_h
         shape_mid   = shape_bot + sh_h / 2
 
-        # Arrow from bottom of previous shape's row to top of this shape
+        # Arrow: from midpoint of gap above this shape down to shape top
         if idx > 0:
-            prev_ry, prev_rh = row_tops[idx - 1]
-            arr_from = prev_ry          # bottom of previous row
+            prev_ry, prev_rh, _ = row_data[idx - 1]
+            prev_shape_bot = prev_ry + V_PAD
+            prev_sh_h      = SHAPE_H.get(row_data[idx-1][2]["shape"], 9 * mm)
+            arr_from = prev_shape_bot   # bottom of previous shape
             arr_to   = shape_top_y + 1 if shape != "diamond" else shape_mid + sh_h/2 + 1
             draw_arrow_down(c, FLOW_CX, arr_from, arr_to)
 
-        # Draw shape
         if shape == "rect":
             draw_rect_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
         elif shape == "oval":
@@ -402,12 +403,7 @@ def generate_pdf(steps, meta):
             c.drawCentredString(FLOW_CX, shape_mid, step["text"])
             c.setFillColor(colors.black)
 
-    cur_y = flow_section_bottom
-
-    # Bottom border of entire table
-    c.setStrokeColor(colors.black)
-    c.setLineWidth(1)
-    c.line(ML, cur_y, ML + TW, cur_y)
+    cur_y = table_bottom
 
     # ══ 5. SOP CHANGE RECORD ════════════════════════════════════════════════
     cur_y -= 4 * mm
