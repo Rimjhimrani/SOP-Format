@@ -58,7 +58,8 @@ def wrapped_lines(c, text, max_w, font_name, font_size):
         lines.append(cur)
     return lines if lines else [""]
 
-def draw_centered_text(c, text, cx, cy, max_w, font_name="Helvetica", font_size=12, color=colors.black):
+def draw_centered_text(c, text, cx, cy, max_w,
+                       font_name="Helvetica", font_size=7, color=colors.black):
     lines = wrapped_lines(c, text, max_w, font_name, font_size)
     line_h = font_size + 1.5
     total_h = len(lines) * line_h
@@ -68,7 +69,8 @@ def draw_centered_text(c, text, cx, cy, max_w, font_name="Helvetica", font_size=
     for i, line in enumerate(lines):
         c.drawCentredString(cx, start_y - i * line_h, line)
 
-def draw_left_text(c, text, x, cy, max_w, font_name="Helvetica", font_size=6.5, color=colors.black):
+def draw_left_text(c, text, x, cy, max_w,
+                   font_name="Helvetica", font_size=6.5, color=colors.black):
     lines = wrapped_lines(c, text, max_w, font_name, font_size)
     line_h = font_size + 1.5
     total_h = len(lines) * line_h
@@ -78,16 +80,17 @@ def draw_left_text(c, text, x, cy, max_w, font_name="Helvetica", font_size=6.5, 
     for i, line in enumerate(lines):
         c.drawString(x, start_y - i * line_h, line)
 
-def draw_arrow_down(c, x, y1, y2):
+def draw_arrow_down(c, x, y_from, y_to):
+    """Draw a downward arrow from y_from to y_to."""
     c.setStrokeColor(colors.black)
     c.setLineWidth(0.8)
-    c.line(x, y1, x, y2 + 3)
     size = 3.5
+    c.line(x, y_from, x, y_to + size * 1.5)
     c.setFillColor(colors.black)
     p = c.beginPath()
-    p.moveTo(x, y2)
-    p.lineTo(x - size, y2 + size * 1.5)
-    p.lineTo(x + size, y2 + size * 1.5)
+    p.moveTo(x, y_to)
+    p.lineTo(x - size, y_to + size * 1.5)
+    p.lineTo(x + size, y_to + size * 1.5)
     p.close()
     c.drawPath(p, fill=1, stroke=0)
 
@@ -103,7 +106,8 @@ def draw_oval_shape(c, x, y, w, h, text, font_size=7):
     c.setFillColor(colors.HexColor("#2c2c2c"))
     c.setLineWidth(0.8)
     c.ellipse(x, y, x + w, y + h, fill=1, stroke=1)
-    draw_centered_text(c, text, x + w / 2, y + h / 2, w - 6, font_size=font_size, color=colors.white)
+    draw_centered_text(c, text, x + w / 2, y + h / 2, w - 6,
+                       font_size=font_size, color=colors.white)
 
 def draw_diamond_shape(c, x, y, w, h, text, font_size=6.5):
     cx, cy = x + w / 2, y + h / 2
@@ -123,9 +127,9 @@ def draw_parallelogram_shape(c, x, y, w, h, text, font_size=7):
     skew = 7
     p = c.beginPath()
     p.moveTo(x + skew, y + h)
-    p.lineTo(x + w, y + h)
+    p.lineTo(x + w,     y + h)
     p.lineTo(x + w - skew, y)
-    p.lineTo(x, y)
+    p.lineTo(x,         y)
     p.close()
     c.setStrokeColor(colors.black)
     c.setFillColor(colors.white)
@@ -133,11 +137,47 @@ def draw_parallelogram_shape(c, x, y, w, h, text, font_size=7):
     c.drawPath(p, fill=1, stroke=1)
     draw_centered_text(c, text, x + w / 2, y + h / 2, w - 10, font_size=font_size)
 
+# ─── Draw a single table row with SELECTIVE borders ───────────────────────────
+def draw_row_cells(c, XS, FLOW_COL_IDX, row_y, row_h,
+                   is_first_row, is_last_row, total_rows):
+    """
+    Draw the 6 cells of a process step row.
+    - Side columns (not flow): full rect border
+    - Flow column: only LEFT and RIGHT vertical borders drawn;
+                   top border only on first row, bottom border only on last row.
+      This removes the horizontal lines inside the flow column between steps.
+    """
+    c.setLineWidth(0.5)
+    c.setStrokeColor(colors.black)
+
+    for i in range(6):
+        x    = XS[i]
+        w    = XS[i+1] - XS[i]
+        if i == FLOW_COL_IDX:
+            # Flow column — draw manually to skip interior h-lines
+            c.setFillColor(colors.white)
+            c.rect(x, row_y, w, row_h, fill=1, stroke=0)   # fill, no stroke
+            # Left vertical
+            c.line(x, row_y, x, row_y + row_h)
+            # Right vertical
+            c.line(x + w, row_y, x + w, row_y + row_h)
+            # Top horizontal — only for first row
+            if is_first_row:
+                c.line(x, row_y + row_h, x + w, row_y + row_h)
+            # Bottom horizontal — only for last row
+            if is_last_row:
+                c.line(x, row_y, x + w, row_y)
+        else:
+            # All other columns — normal full rect
+            c.setFillColor(colors.white)
+            c.rect(x, row_y, w, row_h, fill=1, stroke=1)
+
+
 # ─── PDF Generation ───────────────────────────────────────────────────────────
 def generate_pdf(steps, meta):
     buf = io.BytesIO()
-    PW, PH = landscape(A4)   # ~841 x 595 pts
-    c = canvas.Canvas(buf, pagesize=(PW, PH))
+    PW, PH = landscape(A4)
+    c  = canvas.Canvas(buf, pagesize=(PW, PH))
 
     ML = 14 * mm
     MR = 14 * mm
@@ -146,14 +186,13 @@ def generate_pdf(steps, meta):
 
     cur_y = PH - MT
 
-    # ══ 1. HEADER ════════════════════════════════════════════════════════
+    # ══ 1. HEADER ════════════════════════════════════════════════════════════
     HEADER_H = 22 * mm
-
     left_w   = 44 * mm
     right_w  = 83 * mm
     centre_w = TW - left_w - right_w
 
-    # Company
+    # Company name
     c.setFont("Helvetica-Bold", 11)
     c.setFillColor(colors.black)
     c.drawString(ML, cur_y - 7, meta["company_name"])
@@ -162,89 +201,82 @@ def generate_pdf(steps, meta):
     c.drawString(ML, cur_y - 18, "eka")
     c.setFillColor(colors.black)
 
-    # Title
+    # Centre title
     cx_title = ML + left_w + centre_w / 2
     c.setFont("Helvetica-Bold", 13)
     c.drawCentredString(cx_title, cur_y - 7, "STANDARD OPERATING PROCEDURE")
     c.setFont("Helvetica", 8.5)
     draw_centered_text(c, meta["title"], cx_title, cur_y - 18, centre_w - 4, font_size=8.5)
 
-    # Right meta grid — 4 rows, 4 cols: [label|value|label|value]
-    RX = ML + left_w + centre_w
+    # Right meta grid
+    RX  = ML + left_w + centre_w
     c1w = 18 * mm
     c2w = 24 * mm
     c3w = 12 * mm
-    c4w = right_w - c1w - c2w - c3w   # ~29mm
-
-    rh = HEADER_H / 4
+    c4w = right_w - c1w - c2w - c3w
+    rh  = HEADER_H / 4
 
     meta_rows = [
-        ("SOP No.",  meta["sop_no"],   "Page",  meta["page_info"]),
-        ("Rev No.",  meta["rev_no"],   "Date",  meta["date"]),
-        ("Unit",     meta["unit"],     "Area",  meta["area"]),
-        ("Sub Area", meta["sub_area"], "Zone",  meta["zone"]),
+        ("SOP No.",  meta["sop_no"],   "Page",    meta["page_info"]),
+        ("Rev No.",  meta["rev_no"],   "Date",    meta["date"]),
+        ("Unit",     meta["unit"],     "Area",    meta["area"]),
+        ("Sub Area", meta["sub_area"], "Zone",    meta["zone"]),
     ]
-
     for ri, (l1, v1, l2, v2) in enumerate(meta_rows):
         ry  = cur_y - (ri + 1) * rh
         rxs = [RX, RX+c1w, RX+c1w+c2w, RX+c1w+c2w+c3w, RX+right_w]
-        for ci, (txt, is_label) in enumerate([(l1,True),(v1,False),(l2,True),(v2,False)]):
+        for ci, (txt, is_lbl) in enumerate([(l1,True),(v1,False),(l2,True),(v2,False)]):
             cw = rxs[ci+1] - rxs[ci]
-            c.setFillColor(colors.HexColor("#EEF3FF") if is_label else colors.white)
+            c.setFillColor(colors.HexColor("#EEF3FF") if is_lbl else colors.white)
             c.setStrokeColor(colors.black)
             c.setLineWidth(0.5)
             c.rect(rxs[ci], ry, cw, rh, fill=1, stroke=1)
             c.setFillColor(colors.black)
-            fn = "Helvetica-Bold" if is_label else "Helvetica"
-            fs = 5.8 if is_label else 6
-            draw_left_text(c, txt, rxs[ci]+1.5, ry + rh/2, cw-3, fn, fs)
+            fn = "Helvetica-Bold" if is_lbl else "Helvetica"
+            fs = 5.8 if is_lbl else 6.2
+            draw_left_text(c, txt, rxs[ci]+1.5, ry+rh/2, cw-3, fn, fs)
 
     c.setLineWidth(1)
     c.line(ML, cur_y - HEADER_H, ML + TW, cur_y - HEADER_H)
     cur_y -= HEADER_H
 
-    # ══ 2. PURPOSE / SCOPE ═══════════════════════════════════════════════
-    PS_H  = 8 * mm
-    PL_W  = 18 * mm
-    PV_W  = 82 * mm
-    SL_W  = 14 * mm
-    SV_W  = TW - PL_W - PV_W - SL_W
+    # ══ 2. PURPOSE / SCOPE ══════════════════════════════════════════════════
+    PS_H = 8 * mm
+    PL_W = 18 * mm
+    PV_W = 82 * mm
+    SL_W = 14 * mm
+    SV_W = TW - PL_W - PV_W - SL_W
 
     c.setLineWidth(0.6)
-    # Purpose label
-    c.setFillColor(colors.white)
-    c.rect(ML, cur_y - PS_H, PL_W, PS_H, fill=1, stroke=1)
-    c.setFont("Helvetica-Bold", 8)
-    c.setFillColor(colors.black)
-    c.drawString(ML + 2, cur_y - PS_H + 2.5, "Purpose")
-
-    # Purpose value
-    c.setFillColor(colors.white)
-    c.rect(ML + PL_W, cur_y - PS_H, PV_W, PS_H, fill=1, stroke=1)
-    draw_left_text(c, meta["purpose"], ML + PL_W + 2, cur_y - PS_H/2, PV_W - 4, font_size=7.5)
-
-    # Scope label
-    SX = ML + PL_W + PV_W
-    c.setFillColor(colors.white)
-    c.rect(SX, cur_y - PS_H, SL_W, PS_H, fill=1, stroke=1)
-    c.setFont("Helvetica-Bold", 8)
-    c.setFillColor(colors.black)
-    c.drawString(SX + 2, cur_y - PS_H + 2.5, "Scope")
-
-    # Scope value
-    c.setFillColor(colors.white)
-    c.rect(SX + SL_W, cur_y - PS_H, SV_W, PS_H, fill=1, stroke=1)
-    draw_centered_text(c, meta["scope"], SX + SL_W + SV_W/2, cur_y - PS_H/2, SV_W - 4, font_size=6.5)
+    for x, w, txt, bold, centre in [
+        (ML,           PL_W, "Purpose", True,  False),
+        (ML+PL_W,      PV_W, meta["purpose"], False, False),
+        (ML+PL_W+PV_W, SL_W, "Scope",   True,  False),
+        (ML+PL_W+PV_W+SL_W, SV_W, meta["scope"], False, True),
+    ]:
+        c.setFillColor(colors.white)
+        c.rect(x, cur_y - PS_H, w, PS_H, fill=1, stroke=1)
+        c.setFillColor(colors.black)
+        if bold:
+            c.setFont("Helvetica-Bold", 8)
+            c.drawString(x + 2, cur_y - PS_H + 2.5, txt)
+        elif centre:
+            draw_centered_text(c, txt, x + w/2, cur_y - PS_H/2, w - 4, font_size=6.5)
+        else:
+            draw_left_text(c, txt, x + 2, cur_y - PS_H/2, w - 4, font_size=7.5)
 
     cur_y -= PS_H
 
-    # ══ 3. PROCESS TABLE COLUMNS ═════════════════════════════════════════
+    # ══ 3. COLUMN LAYOUT ════════════════════════════════════════════════════
     COL_IN   = 28 * mm
     COL_OUT  = 26 * mm
     COL_RESP = 30 * mm
     COL_DOC  = 26 * mm
     COL_MEAS = 28 * mm
     COL_FLOW = TW - COL_IN - COL_OUT - COL_RESP - COL_DOC - COL_MEAS
+
+    # Column index of flow column = 1
+    FLOW_COL_IDX = 1
 
     XS = [
         ML,
@@ -257,7 +289,7 @@ def generate_pdf(steps, meta):
     ]
     FLOW_CX = (XS[1] + XS[2]) / 2
 
-    # Table header row 1
+    # ── Header row 1 ─────────────────────────────────────────────────────
     HDR1_H = 7 * mm
     c.setFillColor(colors.HexColor("#DDEEFF"))
     c.rect(ML, cur_y - HDR1_H, TW, HDR1_H, fill=1, stroke=1)
@@ -267,9 +299,10 @@ def generate_pdf(steps, meta):
     c.drawString(XS[3] + 3, cur_y - HDR1_H + 2.5, f"OWNER :   {meta['owner']}")
     cur_y -= HDR1_H
 
-    # Table header row 2
+    # ── Header row 2 ─────────────────────────────────────────────────────
     HDR2_H = 7 * mm
-    col_labels = ["Input", "Process Flow", "Output", "Responsible", "Doc. Format /\nSystem", "Effective\nMeasurement"]
+    col_labels = ["Input", "Process Flow", "Output", "Responsible",
+                  "Doc. Format /\nSystem", "Effective\nMeasurement"]
     for i, label in enumerate(col_labels):
         cw = XS[i+1] - XS[i]
         c.setFillColor(colors.HexColor("#EEF3FF"))
@@ -277,34 +310,50 @@ def generate_pdf(steps, meta):
         c.setFillColor(colors.black)
         lines = label.split("\n")
         lh = 6.5
-        sy = cur_y - HDR2_H/2 + (len(lines)-1) * lh/2
+        sy = cur_y - HDR2_H/2 + (len(lines)-1)*lh/2
         for li, ln in enumerate(lines):
             c.setFont("Helvetica-Bold", 6.5)
             c.drawCentredString(XS[i]+cw/2, sy - li*(lh+0.5), ln)
     cur_y -= HDR2_H
 
-    # ══ 4. STEP ROWS ════════════════════════════════════════════════════
-    SHAPE_H = {"rect": 9*mm, "oval": 9*mm, "parallelogram": 9*mm, "diamond": 15*mm, "arrow_text": 6*mm}
-    V_PAD   = 6 * mm
+    # ══ 4. STEP ROWS ════════════════════════════════════════════════════════
+    SHAPE_H = {
+        "rect":          9 * mm,
+        "oval":          9 * mm,
+        "parallelogram": 9 * mm,
+        "diamond":      15 * mm,
+        "arrow_text":    6 * mm,
+    }
+    V_PAD = 6 * mm
+
+    # Track the top of the flow column (for the outer left/right borders later)
+    flow_section_top = cur_y
+    total_steps = len(steps)
+
+    # We'll collect all row tops/bottoms to draw the flow column border last
+    row_tops = []
 
     for idx, step in enumerate(steps):
         shape  = step["shape"]
-        sh_h   = SHAPE_H.get(shape, 9*mm)
+        sh_h   = SHAPE_H.get(shape, 9 * mm)
         ROW_H  = sh_h + 2 * V_PAD
         ry     = cur_y - ROW_H
+        row_tops.append((ry, ROW_H))
 
-        # Row cells
-        for i in range(6):
-            cw = XS[i+1] - XS[i]
-            c.setFillColor(colors.white)
-            c.setLineWidth(0.5)
-            c.rect(XS[i], ry, cw, ROW_H, fill=1, stroke=1)
+        is_first = (idx == 0)
+        is_last  = (idx == total_steps - 1)
 
-        # Text in side columns
-        def side_text(col_idx, text):
-            if text:
-                cw = XS[col_idx+1] - XS[col_idx]
-                draw_centered_text(c, text, XS[col_idx]+cw/2, ry+ROW_H/2, cw-4, font_size=6.5)
+        # Draw cells with selective borders
+        draw_row_cells(c, XS, FLOW_COL_IDX, ry, ROW_H,
+                       is_first, is_last, total_steps)
+
+        # Side column text
+        def side_text(col_i, txt):
+            if txt:
+                cw = XS[col_i+1] - XS[col_i]
+                draw_centered_text(c, txt,
+                                   XS[col_i] + cw/2, ry + ROW_H/2,
+                                   cw - 4, font_size=6.5)
 
         side_text(0, step["input_label"])
         side_text(2, step["output_label"])
@@ -313,18 +362,20 @@ def generate_pdf(steps, meta):
         side_text(5, step["measurement"])
 
         # Shape geometry
-        sh_w        = COL_FLOW * 0.78
-        sh_x        = FLOW_CX - sh_w / 2
-        shape_bot   = ry + V_PAD
-        shape_top   = shape_bot + sh_h
-        shape_mid_y = shape_bot + sh_h / 2
+        sh_w      = COL_FLOW * 0.78
+        sh_x      = FLOW_CX - sh_w / 2
+        shape_bot = ry + V_PAD
+        shape_top_y = shape_bot + sh_h
+        shape_mid = shape_bot + sh_h / 2
 
-        # Arrow from previous row bottom → shape top
+        # Arrow from previous row bottom → top of this shape
         if idx > 0:
-            arr_from = cur_y
-            arr_to   = shape_top + 1
+            prev_ry, prev_rh = row_tops[idx - 1]
+            arr_from = prev_ry            # bottom of previous row
             if shape == "diamond":
-                arr_to = shape_mid_y + sh_h/2 + 1
+                arr_to = shape_mid + sh_h/2 + 1
+            else:
+                arr_to = shape_top_y + 1
             draw_arrow_down(c, FLOW_CX, arr_from, arr_to)
 
         # Draw shape
@@ -336,7 +387,7 @@ def generate_pdf(steps, meta):
             draw_diamond_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
             c.setFont("Helvetica-Bold", 6.5)
             c.setFillColor(colors.HexColor("#006600"))
-            c.drawString(sh_x + sh_w + 2, shape_mid_y - 3, step.get("yes_label","YES"))
+            c.drawString(sh_x + sh_w + 2, shape_mid - 3, step.get("yes_label","YES"))
             c.setFillColor(colors.HexColor("#CC0000"))
             c.drawString(FLOW_CX - 5, shape_bot - 8, step.get("no_label","NO"))
             c.setFillColor(colors.black)
@@ -345,16 +396,17 @@ def generate_pdf(steps, meta):
         elif shape == "arrow_text":
             c.setFont("Helvetica-Oblique", 7)
             c.setFillColor(colors.HexColor("#333333"))
-            c.drawCentredString(FLOW_CX, shape_mid_y, step["text"])
+            c.drawCentredString(FLOW_CX, shape_mid, step["text"])
             c.setFillColor(colors.black)
 
         cur_y = ry
 
-    # Bottom border
+    # Bottom border of entire table
+    c.setStrokeColor(colors.black)
     c.setLineWidth(1)
     c.line(ML, cur_y, ML + TW, cur_y)
 
-    # ══ 5. CHANGE RECORD ═════════════════════════════════════════════════
+    # ══ 5. SOP CHANGE RECORD ════════════════════════════════════════════════
     cur_y -= 4 * mm
 
     CR_TITLE_H = 6 * mm
@@ -400,6 +452,7 @@ def generate_pdf(steps, meta):
             draw_centered_text(c, val, CR_XS[i]+cw/2, cur_y-CR_ROW_H/2, cw-3, font_size=6)
         cur_y -= CR_ROW_H
 
+    # Footer
     c.setFont("Helvetica-Oblique", 6)
     c.setFillColor(colors.HexColor("#555555"))
     c.drawCentredString(ML + TW/2, cur_y - 5, f"Composed By: {meta['composed_by']}")
@@ -409,7 +462,7 @@ def generate_pdf(steps, meta):
     return buf
 
 
-# ─── UI ──────────────────────────────────────────────────────────────────────
+# ─── Streamlit UI ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     .block-container { padding-top: 1rem; }
@@ -422,8 +475,10 @@ st.markdown("""
 st.title("📋 SOP Builder — Standard Operating Procedure")
 st.caption("Fill in the details, build your process flow, then download as PDF.")
 
-tab1, tab2, tab3, tab4 = st.tabs(["🏷️ Header Info", "🔷 Process Flow", "📝 Change Record", "📄 Download PDF"])
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["🏷️ Header Info", "🔷 Process Flow", "📝 Change Record", "📄 Download PDF"])
 
+# ── TAB 1 ─────────────────────────────────────────────────────────────────────
 with tab1:
     st.subheader("Document Header Fields")
     c1, c2, c3 = st.columns(3)
@@ -445,8 +500,9 @@ with tab1:
     st.divider()
     st.subheader("Purpose & Scope")
     st.session_state.purpose = st.text_input("Purpose", st.session_state.purpose)
-    st.session_state.scope   = st.text_area("Scope",   st.session_state.scope, height=80)
+    st.session_state.scope   = st.text_area("Scope",    st.session_state.scope, height=80)
 
+# ── TAB 2 ─────────────────────────────────────────────────────────────────────
 with tab2:
     st.subheader("Add a Process Step")
     with st.form("add_step_form", clear_on_submit=True):
@@ -463,13 +519,19 @@ with tab2:
             measurement = st.text_input("Effective Measurement")
             yes_label   = st.text_input("YES label (diamonds)", value="YES")
             no_label    = st.text_input("NO label (diamonds)",  value="NO")
+
         if st.form_submit_button("➕ Add Step", use_container_width=True):
             if step_text.strip():
                 st.session_state.steps.append({
-                    "shape": SHAPE_TYPES[shape_label], "text": step_text,
-                    "input_label": input_label, "output_label": output_label,
-                    "responsible": responsible, "doc_format": doc_format,
-                    "measurement": measurement, "yes_label": yes_label, "no_label": no_label,
+                    "shape":        SHAPE_TYPES[shape_label],
+                    "text":         step_text,
+                    "input_label":  input_label,
+                    "output_label": output_label,
+                    "responsible":  responsible,
+                    "doc_format":   doc_format,
+                    "measurement":  measurement,
+                    "yes_label":    yes_label,
+                    "no_label":     no_label,
                 })
                 st.success(f"✅ Added: [{shape_label}] {step_text}")
             else:
@@ -478,26 +540,31 @@ with tab2:
     st.divider()
     st.subheader(f"Steps ({len(st.session_state.steps)})")
     if not st.session_state.steps:
-        st.info("No steps yet.")
+        st.info("No steps yet. Use the form above to add process flow steps.")
     else:
         reverse_map = {v: k for k, v in SHAPE_TYPES.items()}
         for i, step in enumerate(st.session_state.steps):
             label = reverse_map.get(step["shape"], step["shape"])
             with st.expander(f"**Step {i+1}** › [{label}]  {step['text']}", expanded=False):
-                bc1, bc2, bc3, _ = st.columns([1,1,1,4])
+                bc1, bc2, bc3, _ = st.columns([1, 1, 1, 4])
                 if bc1.button("⬆️ Up",     key=f"up_{i}"):
                     if i > 0:
-                        st.session_state.steps[i], st.session_state.steps[i-1] = st.session_state.steps[i-1], st.session_state.steps[i]
+                        st.session_state.steps[i], st.session_state.steps[i-1] = \
+                            st.session_state.steps[i-1], st.session_state.steps[i]
                     st.rerun()
                 if bc2.button("⬇️ Down",   key=f"dn_{i}"):
                     if i < len(st.session_state.steps)-1:
-                        st.session_state.steps[i], st.session_state.steps[i+1] = st.session_state.steps[i+1], st.session_state.steps[i]
+                        st.session_state.steps[i], st.session_state.steps[i+1] = \
+                            st.session_state.steps[i+1], st.session_state.steps[i]
                     st.rerun()
                 if bc3.button("🗑️ Delete", key=f"del_{i}"):
                     st.session_state.steps.pop(i); st.rerun()
                 st.write(f"**Input:** {step['input_label'] or '—'}  |  **Output:** {step['output_label'] or '—'}")
-                st.write(f"**Responsible:** {step['responsible'] or '—'}  |  **Doc:** {step['doc_format'] or '—'}  |  **Measurement:** {step['measurement'] or '—'}")
+                st.write(f"**Responsible:** {step['responsible'] or '—'}  |  "
+                         f"**Doc:** {step['doc_format'] or '—'}  |  "
+                         f"**Measurement:** {step['measurement'] or '—'}")
 
+# ── TAB 3 ─────────────────────────────────────────────────────────────────────
 with tab3:
     st.subheader("SOP Change Record")
     with st.form("cr_form", clear_on_submit=True):
@@ -514,17 +581,21 @@ with tab3:
         if st.form_submit_button("➕ Add Row", use_container_width=True):
             st.session_state.change_records.append({
                 "sno": sno, "date": cdate, "rev": rev, "desc": desc,
-                "change_letter": cl, "prepared": prep, "reviewed": rev2, "approved": appr,
+                "change_letter": cl, "prepared": prep,
+                "reviewed": rev2, "approved": appr,
             })
             st.success("Row added.")
     st.divider()
     for i, cr in enumerate(st.session_state.change_records):
         cc1, cc2 = st.columns([9, 1])
-        cc1.write(f"**{cr['sno']}** | {cr['date']} | Rev {cr['rev']} | {cr['desc']} | "
-                  f"Prepared: {cr['prepared']} | Reviewed: {cr['reviewed']} | Approved: {cr['approved']}")
+        cc1.write(
+            f"**{cr['sno']}** | {cr['date']} | Rev {cr['rev']} | {cr['desc']} | "
+            f"Prepared: {cr['prepared']} | Reviewed: {cr['reviewed']} | Approved: {cr['approved']}"
+        )
         if cc2.button("🗑️", key=f"crdel_{i}"):
             st.session_state.change_records.pop(i); st.rerun()
 
+# ── TAB 4 ─────────────────────────────────────────────────────────────────────
 with tab4:
     st.subheader("Generate & Download PDF")
     if not st.session_state.steps:
@@ -532,9 +603,9 @@ with tab4:
     else:
         st.success(f"Ready — **{len(st.session_state.steps)} step(s)** will be included.")
         meta = {k: st.session_state[k] for k in [
-            "company_name","title","sop_no","rev_no","date","page_info",
-            "unit","area","sub_area","zone","owner","purpose","scope",
-            "composed_by","change_records"
+            "company_name", "title", "sop_no", "rev_no", "date", "page_info",
+            "unit", "area", "sub_area", "zone", "owner", "purpose", "scope",
+            "composed_by", "change_records",
         ]}
         pdf_buf = generate_pdf(st.session_state.steps, meta)
         st.download_button(
@@ -547,8 +618,12 @@ with tab4:
         st.divider()
         st.subheader("Step Summary")
         reverse_map = {v: k for k, v in SHAPE_TYPES.items()}
-        rows = [{"Step": i+1, "Shape": reverse_map.get(s["shape"], s["shape"]),
-                 "Text": s["text"], "Input": s["input_label"],
-                 "Output": s["output_label"], "Responsible": s["responsible"]}
-                for i, s in enumerate(st.session_state.steps)]
+        rows = [{
+            "Step":        i + 1,
+            "Shape":       reverse_map.get(s["shape"], s["shape"]),
+            "Text":        s["text"],
+            "Input":       s["input_label"],
+            "Output":      s["output_label"],
+            "Responsible": s["responsible"],
+        } for i, s in enumerate(st.session_state.steps)]
         st.dataframe(rows, use_container_width=True, hide_index=True)
