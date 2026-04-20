@@ -58,7 +58,7 @@ def wrapped_lines(c, text, max_w, font_name, font_size):
         lines.append(cur)
     return lines if lines else [""]
 
-def draw_centered_text(c, text, cx, cy, max_w, font_name="Helvetica", font_size=7, color=colors.black):
+def draw_centered_text(c, text, cx, cy, max_w, font_name="Helvetica", font_size=12, color=colors.black):
     lines = wrapped_lines(c, text, max_w, font_name, font_size)
     line_h = font_size + 1.5
     total_h = len(lines) * line_h
