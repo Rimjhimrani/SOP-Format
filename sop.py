@@ -29,9 +29,6 @@ defaults = {
         {"sno": "1", "date": "17-12-2024", "rev": "0.0", "desc": "Original Version",
          "change_letter": "NA", "prepared": "Prince S", "reviewed": "Ajay G", "approved": "Vilas B"},
     ],
-    # pending state for multi-step diamond wizard
-    "pending_diamond": None,   # dict with diamond data, waiting for YES/NO branch shapes
-    "diamond_phase": None,     # "yes_shape" or "no_shape"
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -44,11 +41,6 @@ SHAPE_TYPES = {
     "Parallelogram (Input/Output)": "parallelogram",
     "Connector / Annotation Text": "arrow_text",
 }
-SHAPE_TYPES_INV = {v: k for k, v in SHAPE_TYPES.items()}
-
-BRANCH_OPTIONS = ["End (no box)", "Process (Rectangle)", "Oval / Terminator",
-                  "Parallelogram (Input/Output)", "Connector / Annotation Text"]
-
 
 # ─── PDF Helpers ──────────────────────────────────────────────────────────────
 def wrapped_lines(c, text, max_w, font_name, font_size):
@@ -89,6 +81,7 @@ def draw_left_text(c, text, x, cy, max_w,
         c.drawString(x, start_y - i * line_h, line)
 
 def draw_arrow_down(c, x, y_from, y_to):
+    """Draw a downward arrow from y_from to y_to."""
     c.setStrokeColor(colors.black)
     c.setLineWidth(0.8)
     size = 3.5
@@ -100,58 +93,6 @@ def draw_arrow_down(c, x, y_from, y_to):
     p.lineTo(x + size, y_to + size * 1.5)
     p.close()
     c.drawPath(p, fill=1, stroke=0)
-
-def draw_arrow_right(c, x_from, x_to, y, label="", label_color=colors.HexColor("#006600")):
-    """Horizontal rightward arrow with optional label."""
-    c.setStrokeColor(colors.black)
-    c.setLineWidth(0.8)
-    size = 3.5
-    c.line(x_from, y, x_to - size * 1.5, y)
-    c.setFillColor(colors.black)
-    p = c.beginPath()
-    p.moveTo(x_to, y)
-    p.lineTo(x_to - size * 1.5, y + size)
-    p.lineTo(x_to - size * 1.5, y - size)
-    p.close()
-    c.drawPath(p, fill=1, stroke=0)
-    if label:
-        c.setFont("Helvetica-Bold", 6.5)
-        c.setFillColor(label_color)
-        c.drawString(x_from + 2, y + 2, label)
-
-def draw_arrow_left(c, x_from, x_to, y, label="", label_color=colors.HexColor("#CC0000")):
-    """Horizontal leftward arrow with optional label."""
-    c.setStrokeColor(colors.black)
-    c.setLineWidth(0.8)
-    size = 3.5
-    c.line(x_from, y, x_to + size * 1.5, y)
-    c.setFillColor(colors.black)
-    p = c.beginPath()
-    p.moveTo(x_to, y)
-    p.lineTo(x_to + size * 1.5, y + size)
-    p.lineTo(x_to + size * 1.5, y - size)
-    p.close()
-    c.drawPath(p, fill=1, stroke=0)
-    if label:
-        c.setFont("Helvetica-Bold", 6.5)
-        c.setFillColor(label_color)
-        mid_x = (x_from + x_to) / 2
-        c.drawCentredString(mid_x, y + 2, label)
-
-def draw_shape(c, shape, sh_x, shape_bot, sh_w, sh_h, text, FLOW_CX, font_size=7):
-    if shape == "rect":
-        draw_rect_shape(c, sh_x, shape_bot, sh_w, sh_h, text, font_size)
-    elif shape == "oval":
-        draw_oval_shape(c, sh_x, shape_bot, sh_w, sh_h, text, font_size)
-    elif shape == "diamond":
-        draw_diamond_shape(c, sh_x, shape_bot, sh_w, sh_h, text, font_size)
-    elif shape == "parallelogram":
-        draw_parallelogram_shape(c, sh_x, shape_bot, sh_w, sh_h, text, font_size)
-    elif shape == "arrow_text":
-        c.setFont("Helvetica-Oblique", 7)
-        c.setFillColor(colors.HexColor("#333333"))
-        c.drawCentredString(FLOW_CX, shape_bot + sh_h / 2, text)
-        c.setFillColor(colors.black)
 
 def draw_rect_shape(c, x, y, w, h, text, font_size=7):
     c.setStrokeColor(colors.black)
@@ -196,29 +137,47 @@ def draw_parallelogram_shape(c, x, y, w, h, text, font_size=7):
     c.drawPath(p, fill=1, stroke=1)
     draw_centered_text(c, text, x + w / 2, y + h / 2, w - 10, font_size=font_size)
 
-
 # ─── Table drawing helpers ────────────────────────────────────────────────────
 def draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_bottoms):
+    """
+    Draw the entire process-steps table in ONE pass with clean borders:
+
+    Strategy:
+    - Fill full table area white
+    - Draw outer border as one rect
+    - Draw vertical column dividers top-to-bottom (no interruptions)
+    - Draw horizontal row dividers ONLY for the side columns (not flow col)
+    - Flow column stays uncut — seamless vertical channel
+    """
     ML_x    = XS[0]
     total_w = XS[-1] - XS[0]
     total_h = table_top - table_bottom
 
+    # 1. White fill entire table area
     c.setFillColor(colors.white)
     c.rect(ML_x, table_bottom, total_w, total_h, fill=1, stroke=0)
 
+    # 2. Outer border
     c.setStrokeColor(colors.black)
     c.setLineWidth(0.8)
     c.rect(ML_x, table_bottom, total_w, total_h, fill=0, stroke=1)
 
+    # 3. Vertical column dividers (full height, top to bottom)
     c.setLineWidth(0.5)
-    for x in XS[1:-1]:
+    for x in XS[1:-1]:   # interior vertical lines only
         c.line(x, table_bottom, x, table_top)
 
+    # 4. Horizontal row separators — ONLY between side columns, skip flow col
+    flow_x1 = XS[FLOW_COL_IDX]
+    flow_x2 = XS[FLOW_COL_IDX + 1]
+
     c.setLineWidth(0.4)
-    for row_bottom in row_bottoms[:-1]:
+    for row_bottom in row_bottoms[:-1]:   # all except last (already covered by outer border)
         y = row_bottom
+        # Left side columns (indices 0 .. FLOW_COL_IDX-1)
         if FLOW_COL_IDX > 0:
             c.line(XS[0], y, XS[FLOW_COL_IDX], y)
+        # Right side columns (indices FLOW_COL_IDX+1 .. end)
         if FLOW_COL_IDX < 5:
             c.line(XS[FLOW_COL_IDX + 1], y, XS[-1], y)
 
@@ -242,21 +201,25 @@ def generate_pdf(steps, meta):
     right_w  = 83 * mm
     centre_w = TW - left_w - right_w
 
+    # Company name block (left)
     c.setFont("Helvetica-Bold", 11)
     c.setFillColor(colors.black)
     c.drawString(ML, cur_y - 7, meta["company_name"])
 
+    # eka logo text with blue color
     c.setFont("Helvetica-Bold", 10)
     c.setFillColor(colors.HexColor("#1a6dcc"))
     c.drawString(ML, cur_y - 18, "eka")
     c.setFillColor(colors.black)
 
+    # Centre title block
     cx_title = ML + left_w + centre_w / 2
     c.setFont("Helvetica-Bold", 13)
     c.drawCentredString(cx_title, cur_y - 7, "STANDARD OPERATING PROCEDURE")
     c.setFont("Helvetica", 8.5)
     draw_centered_text(c, meta["title"], cx_title, cur_y - 18, centre_w - 4, font_size=8.5)
 
+    # Right meta grid
     RX  = ML + left_w + centre_w
     c1w = 18 * mm
     c2w = 24 * mm
@@ -335,10 +298,8 @@ def generate_pdf(steps, meta):
         ML + TW,
     ]
     FLOW_CX = (XS[1] + XS[2]) / 2
-    FLOW_LEFT  = XS[1]
-    FLOW_RIGHT = XS[2]
 
-    # ── Header row 1
+    # ── Header row 1 ─────────────────────────────────────────────────────
     HDR1_H = 7 * mm
     c.setFillColor(colors.HexColor("#DDEEFF"))
     c.rect(ML, cur_y - HDR1_H, TW, HDR1_H, fill=1, stroke=1)
@@ -348,7 +309,7 @@ def generate_pdf(steps, meta):
     c.drawString(XS[3] + 3, cur_y - HDR1_H + 2.5, f"OWNER :   {meta['owner']}")
     cur_y -= HDR1_H
 
-    # ── Header row 2
+    # ── Header row 2 ─────────────────────────────────────────────────────
     HDR2_H = 7 * mm
     col_labels = ["Input", "Process Flow", "Output", "Responsible",
                   "Doc. Format /\nSystem", "Effective\nMeasurement"]
@@ -375,31 +336,21 @@ def generate_pdf(steps, meta):
     }
     V_PAD = 6 * mm
 
-    # For diamonds: the YES branch shape gets an extra row if present
-    # We need to compute row heights accounting for embedded branch shapes
+    table_top   = cur_y   # top of data rows (just below col header)
+    total_steps = len(steps)
 
-    table_top = cur_y
-
-    # ── PASS 1: calculate row geometries ─────────────────────────────────────
-    row_data = []
+    # ── PASS 1: calculate all row geometries ─────────────────────────────────
+    row_data = []   # list of (row_bottom_y, row_h, step)
     scan_y = cur_y
     for step in steps:
         sh_h  = SHAPE_H.get(step["shape"], 9 * mm)
-
-        # If diamond with a YES shape, its row is taller to contain it
-        extra_h = 0
-        if step["shape"] == "diamond":
-            yes_shape = step.get("yes_branch_shape")
-            if yes_shape and yes_shape != "none":
-                extra_h = SHAPE_H.get(yes_shape, 9 * mm) + V_PAD
-
-        ROW_H = sh_h + 2 * V_PAD + extra_h
+        ROW_H = sh_h + 2 * V_PAD
         ry    = scan_y - ROW_H
         row_data.append((ry, ROW_H, step))
         scan_y = ry
-    table_bottom = scan_y
+    table_bottom = scan_y   # bottom of last row
 
-    # ── PASS 2: draw table structure ─────────────────────────────────────────
+    # ── PASS 2: draw table structure (clean, no interior flow-col lines) ─────
     row_bottoms = [rd[0] for rd in row_data]
     draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_bottoms)
 
@@ -412,7 +363,7 @@ def generate_pdf(steps, meta):
                 cw = XS[col_i+1] - XS[col_i]
                 draw_centered_text(c, txt, XS[col_i]+cw/2, ry+ROW_H/2, cw-4, font_size=6.5)
 
-    # ── PASS 4: arrows and shapes ─────────────────────────────────────────────
+    # ── PASS 4: arrows and shapes on top ─────────────────────────────────────
     sh_w = COL_FLOW * 0.78
     sh_x = FLOW_CX - sh_w / 2
 
@@ -421,102 +372,36 @@ def generate_pdf(steps, meta):
         sh_h        = SHAPE_H.get(shape, 9 * mm)
         shape_bot   = ry + V_PAD
         shape_top_y = shape_bot + sh_h
-        shape_mid_y = shape_bot + sh_h / 2
+        shape_mid   = shape_bot + sh_h / 2
 
-        # ── Arrow INTO this shape from the shape above
+        # Arrow: from midpoint of gap above this shape down to shape top
         if idx > 0:
-            prev_ry, prev_rh, prev_step = row_data[idx - 1]
-            prev_sh_h = SHAPE_H.get(prev_step["shape"], 9 * mm)
+            prev_ry, prev_rh, _ = row_data[idx - 1]
             prev_shape_bot = prev_ry + V_PAD
-            arr_from = prev_shape_bot  # bottom of previous shape
-            arr_to   = shape_top_y
-            draw_arrow_down(c, FLOW_CX, arr_from, arr_to + 1)
+            prev_sh_h      = SHAPE_H.get(row_data[idx-1][2]["shape"], 9 * mm)
+            arr_from = prev_shape_bot   # bottom of previous shape
+            arr_to   = shape_top_y + 1 if shape != "diamond" else shape_mid + sh_h/2 + 1
+            draw_arrow_down(c, FLOW_CX, arr_from, arr_to)
 
-        # ── Draw the main shape
-        draw_shape(c, shape, sh_x, shape_bot, sh_w, sh_h, step["text"], FLOW_CX)
-
-        # ── Diamond branching logic
-        if shape == "diamond":
-            yes_label     = step.get("yes_label", "YES")
-            no_label      = step.get("no_label", "NO")
-            yes_shape_key = step.get("yes_branch_shape", "none")   # shape type key
-            yes_shape_txt = step.get("yes_branch_text", "")
-            no_desc       = step.get("no_branch_desc", "")
-
-            diamond_cx   = FLOW_CX
-            diamond_mid  = shape_mid_y
-            diamond_right_x = sh_x + sh_w   # right tip of diamond
-
-            # ── YES branch: arrow going RIGHT from diamond tip
-            yes_arrow_start = diamond_right_x
-            yes_arrow_end   = FLOW_RIGHT - 2
-
-            c.setStrokeColor(colors.black)
-            c.setLineWidth(0.8)
-            c.line(yes_arrow_start, diamond_mid, yes_arrow_end, diamond_mid)
-            # Arrowhead rightward
-            size = 3.5
-            c.setFillColor(colors.black)
-            p = c.beginPath()
-            p.moveTo(yes_arrow_end, diamond_mid)
-            p.lineTo(yes_arrow_end - size*1.5, diamond_mid + size)
-            p.lineTo(yes_arrow_end - size*1.5, diamond_mid - size)
-            p.close()
-            c.drawPath(p, fill=1, stroke=0)
-            # YES label
+        if shape == "rect":
+            draw_rect_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
+        elif shape == "oval":
+            draw_oval_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
+        elif shape == "diamond":
+            draw_diamond_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
             c.setFont("Helvetica-Bold", 6.5)
             c.setFillColor(colors.HexColor("#006600"))
-            c.drawString(yes_arrow_start + 2, diamond_mid + 2, yes_label)
-
-            # Draw YES branch shape (if any) inside the flow column to the right side
-            if yes_shape_key and yes_shape_key != "none":
-                yes_sh_h = SHAPE_H.get(yes_shape_key, 9 * mm)
-                # Place it below the mid-level in same row
-                yes_sh_w = sh_w * 0.85
-                # Right-aligned inside flow column
-                yes_sh_x = FLOW_RIGHT - yes_sh_w - 2
-                yes_sh_bot = shape_bot - yes_sh_h - V_PAD / 2
-
-                # vertical connector from arrow end down to yes shape top
-                yes_shape_top = yes_sh_bot + yes_sh_h
-                c.setStrokeColor(colors.black)
-                c.setLineWidth(0.8)
-                # horizontal line from diamond to right edge
-                # then down, then left arrow into the yes shape
-                # Draw: right from diamond → down → left into shape
-                conn_x = FLOW_RIGHT - 4
-                c.line(conn_x, diamond_mid, conn_x, yes_shape_top + yes_sh_h / 2)
-                draw_arrow_down(c, conn_x, yes_shape_top + yes_sh_h, yes_shape_top + 1)
-
-                draw_shape(c, yes_shape_key, yes_sh_x, yes_sh_bot, yes_sh_w, yes_sh_h,
-                           yes_shape_txt, FLOW_CX)
-
-                # Also annotate side columns if yes branch has details
-                yes_resp = step.get("yes_branch_responsible", "")
-                yes_doc  = step.get("yes_branch_doc", "")
-                if yes_resp or yes_doc:
-                    branch_cy = yes_sh_bot + yes_sh_h / 2
-                    # responsible col
-                    cw3 = XS[4] - XS[3]
-                    draw_centered_text(c, yes_resp, XS[3]+cw3/2, branch_cy, cw3-4, font_size=6)
-                    # doc col
-                    cw4 = XS[5] - XS[4]
-                    draw_centered_text(c, yes_doc, XS[4]+cw4/2, branch_cy, cw4-4, font_size=6)
-
-            # ── NO branch: arrow going DOWN with label + annotation text
-            no_arrow_from = shape_bot   # bottom tip of diamond
-            # label appears just below diamond
-            c.setFont("Helvetica-Bold", 6.5)
+            c.drawString(sh_x + sh_w + 2, shape_mid - 3, step.get("yes_label", "YES"))
             c.setFillColor(colors.HexColor("#CC0000"))
-            c.drawCentredString(FLOW_CX, no_arrow_from - 5, no_label)
+            c.drawString(FLOW_CX - 5, shape_bot - 8, step.get("no_label", "NO"))
             c.setFillColor(colors.black)
-
-            # NO description text displayed below diamond, above next arrow
-            if no_desc:
-                c.setFont("Helvetica-Oblique", 6)
-                c.setFillColor(colors.HexColor("#CC0000"))
-                c.drawCentredString(FLOW_CX, no_arrow_from - 13, no_desc)
-                c.setFillColor(colors.black)
+        elif shape == "parallelogram":
+            draw_parallelogram_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
+        elif shape == "arrow_text":
+            c.setFont("Helvetica-Oblique", 7)
+            c.setFillColor(colors.HexColor("#333333"))
+            c.drawCentredString(FLOW_CX, shape_mid, step["text"])
+            c.setFillColor(colors.black)
 
     cur_y = table_bottom
 
@@ -566,6 +451,7 @@ def generate_pdf(steps, meta):
             draw_centered_text(c, val, CR_XS[i]+cw/2, cur_y-CR_ROW_H/2, cw-3, font_size=6)
         cur_y -= CR_ROW_H
 
+    # Footer
     c.setFont("Helvetica-Oblique", 6)
     c.setFillColor(colors.HexColor("#555555"))
     c.drawCentredString(ML + TW/2, cur_y - 5, f"Composed By: {meta['composed_by']}")
@@ -582,13 +468,6 @@ st.markdown("""
     h1 { font-size: 1.35rem; margin-bottom: 0.2rem; }
     h2 { font-size: 1.05rem; }
     .stButton > button { width: 100%; }
-    .diamond-wizard {
-        background: #FFF8E1;
-        border: 2px solid #FFC107;
-        border-radius: 8px;
-        padding: 12px 16px;
-        margin-bottom: 12px;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -624,75 +503,10 @@ with tab1:
 
 # ── TAB 2 ─────────────────────────────────────────────────────────────────────
 with tab2:
-
-    # ════════════ DIAMOND WIZARD (if a diamond was just added) ════════════════
-    if st.session_state.pending_diamond is not None:
-        diamond_data = st.session_state.pending_diamond
-        st.markdown("""
-        <div style="background:#FFF8E1;border:2px solid #FFC107;border-radius:8px;
-                    padding:12px 16px;margin-bottom:12px;">
-        <b>🔷 Decision Branch Configuration</b><br>
-        You added a Decision diamond: <em>"{}"</em><br>
-        Now configure its YES and NO branches below.
-        </div>
-        """.format(diamond_data.get("text", "")), unsafe_allow_html=True)
-
-        with st.form("diamond_branches_form"):
-            st.markdown("### ✅ YES Branch")
-            yes_label = st.text_input("YES label text", value="YES")
-
-            yes_branch_choice = st.selectbox(
-                "What happens on YES?",
-                ["End (no additional box)", "Process (Rectangle)", "Oval / Terminator",
-                 "Parallelogram (Input/Output)", "Connector / Annotation Text"],
-                index=0
-            )
-            yes_branch_text = ""
-            yes_branch_responsible = ""
-            yes_branch_doc = ""
-            if yes_branch_choice != "End (no additional box)":
-                yes_branch_text        = st.text_input("YES branch — text inside shape")
-                yes_branch_responsible = st.text_input("YES branch — Responsible")
-                yes_branch_doc         = st.text_input("YES branch — Doc. Format")
-
-            st.divider()
-            st.markdown("### ❌ NO Branch")
-            no_label = st.text_input("NO label text", value="NO")
-            no_desc  = st.text_input(
-                "NO branch — annotation text (shown below diamond, flow continues down)",
-                placeholder="e.g. Check the part availability in Loaded Trolley Area"
-            )
-
-            submitted = st.form_submit_button("✅ Save Diamond with Branches", use_container_width=True)
-            if submitted:
-                shape_map = {
-                    "End (no additional box)": "none",
-                    "Process (Rectangle)": "rect",
-                    "Oval / Terminator": "oval",
-                    "Parallelogram (Input/Output)": "parallelogram",
-                    "Connector / Annotation Text": "arrow_text",
-                }
-                diamond_data["yes_label"]            = yes_label
-                diamond_data["no_label"]             = no_label
-                diamond_data["no_branch_desc"]       = no_desc
-                diamond_data["yes_branch_shape"]     = shape_map[yes_branch_choice]
-                diamond_data["yes_branch_text"]      = yes_branch_text
-                diamond_data["yes_branch_responsible"] = yes_branch_responsible
-                diamond_data["yes_branch_doc"]       = yes_branch_doc
-
-                st.session_state.steps.append(diamond_data)
-                st.session_state.pending_diamond = None
-                st.success(f"✅ Diamond + branches saved!")
-                st.rerun()
-
-        st.stop()
-
-    # ════════════ NORMAL ADD STEP FORM ═══════════════════════════════════════
     st.subheader("Add a Process Step")
     with st.form("add_step_form", clear_on_submit=True):
         shape_label = st.selectbox("Box / Shape Type", list(SHAPE_TYPES.keys()))
         step_text   = st.text_input("Text inside shape *")
-
         c1, c2, c3 = st.columns(3)
         with c1:
             input_label  = st.text_input("Input Label")
@@ -702,47 +516,35 @@ with tab2:
             doc_format   = st.text_input("Doc. Format / System")
         with c3:
             measurement = st.text_input("Effective Measurement")
+            yes_label   = st.text_input("YES label (diamonds)", value="YES")
+            no_label    = st.text_input("NO label (diamonds)",  value="NO")
 
         if st.form_submit_button("➕ Add Step", use_container_width=True):
             if step_text.strip():
-                shape_key = SHAPE_TYPES[shape_label]
-                step_obj  = {
-                    "shape":        shape_key,
+                st.session_state.steps.append({
+                    "shape":        SHAPE_TYPES[shape_label],
                     "text":         step_text,
                     "input_label":  input_label,
                     "output_label": output_label,
                     "responsible":  responsible,
                     "doc_format":   doc_format,
                     "measurement":  measurement,
-                }
-                if shape_key == "diamond":
-                    # Enter the wizard — don't add yet, store as pending
-                    st.session_state.pending_diamond = step_obj
-                    st.rerun()
-                else:
-                    st.session_state.steps.append(step_obj)
-                    st.success(f"✅ Added: [{shape_label}] {step_text}")
+                    "yes_label":    yes_label,
+                    "no_label":     no_label,
+                })
+                st.success(f"✅ Added: [{shape_label}] {step_text}")
             else:
                 st.warning("Please enter shape text.")
 
     st.divider()
-
-    # ── Step list ─────────────────────────────────────────────────────────────
     st.subheader(f"Steps ({len(st.session_state.steps)})")
     if not st.session_state.steps:
         st.info("No steps yet. Use the form above to add process flow steps.")
     else:
+        reverse_map = {v: k for k, v in SHAPE_TYPES.items()}
         for i, step in enumerate(st.session_state.steps):
-            label = SHAPE_TYPES_INV.get(step["shape"], step["shape"])
-            branch_info = ""
-            if step["shape"] == "diamond":
-                yes_sh = step.get("yes_branch_shape", "none")
-                yes_lbl = step.get("yes_label", "YES")
-                no_lbl  = step.get("no_label", "NO")
-                yes_desc = f"→ {yes_sh} shape" if yes_sh and yes_sh != "none" else "→ End"
-                branch_info = f"  |  ✅ {yes_lbl}: {yes_desc}  |  ❌ {no_lbl}: continues down"
-
-            with st.expander(f"**Step {i+1}** › [{label}]  {step['text']}{branch_info}", expanded=False):
+            label = reverse_map.get(step["shape"], step["shape"])
+            with st.expander(f"**Step {i+1}** › [{label}]  {step['text']}", expanded=False):
                 bc1, bc2, bc3, _ = st.columns([1, 1, 1, 4])
                 if bc1.button("⬆️ Up",     key=f"up_{i}"):
                     if i > 0:
@@ -756,20 +558,10 @@ with tab2:
                     st.rerun()
                 if bc3.button("🗑️ Delete", key=f"del_{i}"):
                     st.session_state.steps.pop(i); st.rerun()
-
                 st.write(f"**Input:** {step['input_label'] or '—'}  |  **Output:** {step['output_label'] or '—'}")
                 st.write(f"**Responsible:** {step['responsible'] or '—'}  |  "
                          f"**Doc:** {step['doc_format'] or '—'}  |  "
                          f"**Measurement:** {step['measurement'] or '—'}")
-
-                if step["shape"] == "diamond":
-                    yes_sh  = step.get("yes_branch_shape", "none")
-                    yes_txt = step.get("yes_branch_text", "")
-                    no_desc = step.get("no_branch_desc", "")
-                    st.markdown(f"""
-                    **✅ YES branch shape:** `{yes_sh}` — *{yes_txt or '(end)'}*  
-                    **❌ NO branch desc:** *{no_desc or '(none)'}*
-                    """)
 
 # ── TAB 3 ─────────────────────────────────────────────────────────────────────
 with tab3:
@@ -824,14 +616,13 @@ with tab4:
         )
         st.divider()
         st.subheader("Step Summary")
+        reverse_map = {v: k for k, v in SHAPE_TYPES.items()}
         rows = [{
             "Step":        i + 1,
-            "Shape":       SHAPE_TYPES_INV.get(s["shape"], s["shape"]),
+            "Shape":       reverse_map.get(s["shape"], s["shape"]),
             "Text":        s["text"],
             "Input":       s["input_label"],
             "Output":      s["output_label"],
             "Responsible": s["responsible"],
-            "YES Branch":  s.get("yes_branch_text", "—") if s["shape"] == "diamond" else "—",
-            "NO Branch":   s.get("no_branch_desc", "—")  if s["shape"] == "diamond" else "—",
         } for i, s in enumerate(st.session_state.steps)]
         st.dataframe(rows, use_container_width=True, hide_index=True)
