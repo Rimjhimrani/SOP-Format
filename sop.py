@@ -365,7 +365,14 @@ def generate_pdf(steps, meta):
 
     # ── PASS 4: arrows and shapes on top ─────────────────────────────────────
     sh_w = COL_FLOW * 0.78
-    sh_x = FLOW_CX - sh_w / 2
+    position = step.get("position", "center")
+    if position == "center":
+        sh_x = FLOW_CX - sh_w / 2
+    elif position == "right (YES)":
+        sh_x = FLOW_CX + COL_FLOW * 0.55
+    elif position == "left (NO)":
+        sh_x = FLOW_CX - COL_FLOW * 0.55 - sh_w
+    
 
     for idx, (ry, ROW_H, step) in enumerate(row_data):
         shape       = step["shape"]
