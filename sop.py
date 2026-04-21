@@ -368,26 +368,40 @@ def generate_pdf(steps, meta):
         else:
             sh_x = FLOW_CX - sh_w / 2
 
-        # FIX: branch connector from previous decision — inside the loop
+        # Branch connector from previous decision diamond
         branch = step.get("branch_from_prev", "None")
         if last_decision is not None and branch != "None":
-            c.setStrokeColor(colors.black)
             c.setLineWidth(0.8)
             if branch == "YES":
+                # Right side of diamond → right to shape's left edge
                 start_x = last_decision["x"] + last_decision["width"] / 2
                 start_y = last_decision["y"]
-                end_x   = sh_x
-                end_y   = shape_mid
-                # horizontal then vertical connector
-                c.line(start_x, start_y, end_x, start_y)
-                c.line(end_x, start_y, end_x, end_y)
+                end_x   = sh_x + sh_w / 2   # centre-top of destination shape
+                end_y   = shape_top_y
+                c.setStrokeColor(colors.HexColor("#006600"))
+                c.line(start_x, start_y, end_x, start_y)   # horizontal leg
+                draw_arrow_down(c, end_x, start_y, end_y)   # vertical arrow down
+                # "YES →" label on horizontal leg
+                c.setFont("Helvetica-Bold", 6)
+                c.setFillColor(colors.HexColor("#006600"))
+                c.drawString(start_x + 2, start_y + 2, "YES")
+                c.setFillColor(colors.black)
+                c.setStrokeColor(colors.black)
             elif branch == "NO":
+                # Left side of diamond → left to shape's centre-top
                 start_x = last_decision["x"] - last_decision["width"] / 2
                 start_y = last_decision["y"]
-                end_x   = sh_x + sh_w
-                end_y   = shape_mid
-                c.line(start_x, start_y, end_x, start_y)
-                c.line(end_x, start_y, end_x, end_y)
+                end_x   = sh_x + sh_w / 2
+                end_y   = shape_top_y
+                c.setStrokeColor(colors.HexColor("#CC0000"))
+                c.line(start_x, start_y, end_x, start_y)   # horizontal leg
+                draw_arrow_down(c, end_x, start_y, end_y)   # vertical arrow down
+                # "NO →" label on horizontal leg
+                c.setFont("Helvetica-Bold", 6)
+                c.setFillColor(colors.HexColor("#CC0000"))
+                c.drawString(end_x + 2, start_y + 2, "NO")
+                c.setFillColor(colors.black)
+                c.setStrokeColor(colors.black)
 
         # Arrow down from previous centre shape to this one
         if idx > 0 and position == "center":
@@ -412,20 +426,16 @@ def generate_pdf(steps, meta):
                 "width":  sh_w,
                 "height": sh_h,
             }
-            flow_type = step.get("decision_flow", "yes_main")
+            yes_lbl = step.get("yes_label", "YES") or "YES"
+            no_lbl  = step.get("no_label",  "NO")  or "NO"
             c.setFont("Helvetica-Bold", 6.5)
-            if flow_type == "yes_main":
-                c.setFillColor(colors.HexColor("#006600"))
-                c.drawString(sh_x + sh_w + 2, shape_mid - 3, "YES ↓")
-            elif flow_type == "yes_end":
-                c.setFillColor(colors.HexColor("#006600"))
-                c.drawString(sh_x + sh_w + 2, shape_mid - 3, "YES → END")
-            if flow_type == "no_main":
-                c.setFillColor(colors.HexColor("#CC0000"))
-                c.drawString(FLOW_CX - 5, shape_bot - 8, "NO ↓")
-            elif flow_type == "no_end":
-                c.setFillColor(colors.HexColor("#CC0000"))
-                c.drawString(FLOW_CX - 5, shape_bot - 8, "NO → END")
+            # YES label — right tip of diamond
+            c.setFillColor(colors.HexColor("#006600"))
+            c.drawString(sh_x + sh_w + 3, shape_mid - 3, f"{yes_lbl} →")
+            # NO label — left tip of diamond
+            c.setFillColor(colors.HexColor("#CC0000"))
+            c.drawString(sh_x - c.stringWidth(f"← {no_lbl}", "Helvetica-Bold", 6.5) - 3,
+                         shape_mid - 3, f"← {no_lbl}")
             c.setFillColor(colors.black)
         elif shape == "parallelogram":
             draw_parallelogram_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
@@ -435,8 +445,8 @@ def generate_pdf(steps, meta):
             c.drawCentredString(FLOW_CX, shape_mid, step["text"])
             c.setFillColor(colors.black)
 
-        # Clear last_decision if this step is NOT a diamond
-        if shape != "diamond":
+        # Clear last_decision only when a non-branch centre shape interrupts the diamond chain
+        if shape != "diamond" and branch == "None" and position == "center":
             last_decision = None
 
     cur_y = table_bottom
