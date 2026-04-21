@@ -389,11 +389,22 @@ def generate_pdf(steps, meta):
             draw_oval_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
         elif shape == "diamond":
             draw_diamond_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
+            flow_type = step.get("decision_flow", "yes_main")
+            # YES path (right side)
             c.setFont("Helvetica-Bold", 6.5)
-            c.setFillColor(colors.HexColor("#006600"))
-            c.drawString(sh_x + sh_w + 2, shape_mid - 3, step.get("yes_label", "YES"))
-            c.setFillColor(colors.HexColor("#CC0000"))
-            c.drawString(FLOW_CX - 5, shape_bot - 8, step.get("no_label", "NO"))
+            if flow_type == "yes_main":
+                c.setFillColor(colors.HexColor("#006600"))
+                c.drawString(sh_x + sh_w + 2, shape_mid - 3, "YES ↓")
+            elif flow_type == "yes_end":
+                c.setFillColor(colors.HexColor("#006600"))'
+                c.drawString(sh_x + sh_w + 2, shape_mid - 3, "YES → END")
+            # NO path (bottom)
+            if flow_type == "no_main":
+                c.setFillColor(colors.HexColor("#CC0000"))
+                c.drawString(FLOW_CX - 5, shape_bot - 8, "NO ↓")
+            elif flow_type == "no_end":
+                c.setFillColor(colors.HexColor("#CC0000"))
+                c.drawString(FLOW_CX - 5, shape_bot - 8, "NO → END")
             c.setFillColor(colors.black)
         elif shape == "parallelogram":
             draw_parallelogram_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
