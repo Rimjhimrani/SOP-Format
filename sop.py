@@ -363,6 +363,26 @@ def generate_pdf(steps, meta):
                 cw = XS[col_i+1] - XS[col_i]
                 draw_centered_text(c, txt, XS[col_i]+cw/2, ry+ROW_H/2, cw-4, font_size=6.5)
 
+    branch = step.get("branch_from_prev", "None")
+    if last_decision and branch != "None":
+        if branch == "YES":
+            # Right branch
+            start_x = last_decision["x"] + sh_w / 2
+            start_y = last_decision["y"]
+            
+            end_x = sh_x
+            end_y = shape_mid
+            
+            c.line(start_x, start_y, end_x, end_y)
+        
+        elif branch == "NO":
+            # Left branch
+            start_x = last_decision["x"] - sh_w / 2
+            start_y = last_decision["y"]
+            end_x = sh_x + sh_w
+            end_y = shape_mid
+            c.line(start_x, start_y, end_x, end_y)
+            
     # ── PASS 4: arrows and shapes on top ─────────────────────────────────────
     sh_w = COL_FLOW * 0.78
     position = step.get("position", "center")
@@ -374,7 +394,6 @@ def generate_pdf(steps, meta):
         sh_x = FLOW_CX - COL_FLOW * 0.55 - sh_w
     last_decision = None
     
-
     for idx, (ry, ROW_H, step) in enumerate(row_data):
         shape       = step["shape"]
         sh_h        = SHAPE_H.get(shape, 9 * mm)
@@ -396,6 +415,12 @@ def generate_pdf(steps, meta):
         elif shape == "oval":
             draw_oval_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
         elif shape == "diamond":
+            last_decision = {
+                "x": FLOW_CX,
+                "y": shape_mid,
+                "width": sh_w,
+                "height": sh_h
+            }
             draw_diamond_shape(c, sh_x, shape_bot, sh_w, sh_h, step["text"])
             flow_type = step.get("decision_flow", "yes_main")
             # YES path (right side)
