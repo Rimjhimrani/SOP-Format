@@ -542,6 +542,10 @@ with tab2:
                     "measurement":  measurement,
                     "yes_label":    yes_label,
                     "no_label":     no_label,
+
+                    # ✅ ADD THESE
+                    "position": position,
+                    "branch_from_prev": branch_from_prev,
                 })
                 st.success(f"✅ Added: [{shape_label}] {step_text}")
             else:
