@@ -372,6 +372,7 @@ def generate_pdf(steps, meta):
         sh_x = FLOW_CX + COL_FLOW * 0.55
     elif position == "left (NO)":
         sh_x = FLOW_CX - COL_FLOW * 0.55 - sh_w
+    last_decision = None
     
 
     for idx, (ry, ROW_H, step) in enumerate(row_data):
