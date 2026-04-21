@@ -402,7 +402,7 @@ def generate_pdf(steps, meta):
         shape_mid   = shape_bot + sh_h / 2
 
         # Arrow: from midpoint of gap above this shape down to shape top
-        if idx > 0:
+        if idx > 0 and step.get("position", "center") == "center":
             prev_ry, prev_rh, _ = row_data[idx - 1]
             prev_shape_bot = prev_ry + V_PAD
             prev_sh_h      = SHAPE_H.get(row_data[idx-1][2]["shape"], 9 * mm)
