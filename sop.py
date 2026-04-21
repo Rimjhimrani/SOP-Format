@@ -396,7 +396,7 @@ def generate_pdf(steps, meta):
                 c.setFillColor(colors.HexColor("#006600"))
                 c.drawString(sh_x + sh_w + 2, shape_mid - 3, "YES ↓")
             elif flow_type == "yes_end":
-                c.setFillColor(colors.HexColor("#006600"))'
+                c.setFillColor(colors.HexColor("#006600"))
                 c.drawString(sh_x + sh_w + 2, shape_mid - 3, "YES → END")
             # NO path (bottom)
             if flow_type == "no_main":
