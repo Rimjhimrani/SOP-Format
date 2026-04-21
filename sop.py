@@ -155,27 +155,26 @@ def draw_arrow_left(c, x_from, x_to, y, color=colors.black, label="", label_colo
 
 def draw_elbow_arrow(c, sx, sy, ex, ey, color=colors.black, label="", label_color=colors.black):
     """
-    L-shaped connector: horizontal then vertical, with arrowhead at end.
-    Used for cross-column connections and loop-backs.
+    L-shaped connector: horizontal leg then vertical leg with arrowhead.
+    In ReportLab: y increases upward, so ey < sy means visually downward.
     """
     c.setStrokeColor(color)
     c.setLineWidth(0.8)
     size = 3.5
-    # horizontal leg
+    # horizontal leg from source to target x
     c.line(sx, sy, ex, sy)
-    # vertical leg
-    direction = "down" if ey < sy else "up"
-    if direction == "down":
+    # vertical leg downward (ey < sy) or upward (ey > sy)
+    if ey < sy:   # visually downward
         c.line(ex, sy, ex, ey + size * 1.5)
         arrowhead(c, ex, ey, "down")
-    else:
+    else:         # visually upward
         c.line(ex, sy, ex, ey - size * 1.5)
         arrowhead(c, ex, ey, "up")
     if label:
         c.setFont("Helvetica-Bold", 6)
         c.setFillColor(label_color)
-        # put label near the horizontal midpoint
         lx = (sx + ex) / 2
+        # put label above the horizontal leg
         c.drawCentredString(lx, sy + 2.5, label)
     c.setStrokeColor(colors.black)
     c.setFillColor(colors.black)
@@ -310,11 +309,11 @@ def generate_pdf(steps, meta):
     cur_y -= PS_H
 
     # ══ 3. COLUMN LAYOUT ══════════════════════════════════════════════════════
-    COL_IN   = 28 * mm
-    COL_OUT  = 26 * mm
-    COL_RESP = 30 * mm
-    COL_DOC  = 26 * mm
-    COL_MEAS = 28 * mm
+    COL_IN   = 25 * mm
+    COL_OUT  = 22 * mm
+    COL_RESP = 28 * mm
+    COL_DOC  = 24 * mm
+    COL_MEAS = 26 * mm
     COL_FLOW = TW - COL_IN - COL_OUT - COL_RESP - COL_DOC - COL_MEAS
     FLOW_COL_IDX = 1
 
@@ -327,16 +326,14 @@ def generate_pdf(steps, meta):
         ML + COL_IN + COL_FLOW + COL_OUT + COL_RESP + COL_DOC,
         ML + TW,
     ]
-    FLOW_L  = XS[1]  # left edge of flow column
-    FLOW_R  = XS[2]  # right edge of flow column
+    FLOW_L = XS[1]
+    FLOW_R = XS[2]
 
-    # Two sub-columns inside the flow column
-    # left column  centre: 35% from left edge
-    # right column centre: 75% from left edge
-    LEFT_CX  = FLOW_L + COL_FLOW * 0.28
-    RIGHT_CX = FLOW_L + COL_FLOW * 0.72
-    SH_W_L   = COL_FLOW * 0.42   # shape width for left column shapes
-    SH_W_R   = COL_FLOW * 0.40   # shape width for right column shapes
+    # Two sub-columns strictly inside the flow column
+    SH_W_L   = COL_FLOW * 0.44 - 2*mm
+    SH_W_R   = COL_FLOW * 0.44 - 2*mm
+    LEFT_CX  = FLOW_L + COL_FLOW * 0.25
+    RIGHT_CX = FLOW_L + COL_FLOW * 0.75
 
     # ── Header rows ─────────────────────────────────────────────────────────
     HDR1_H = 7 * mm
@@ -374,27 +371,57 @@ def generate_pdf(steps, meta):
     V_PAD     = 5 * mm
     table_top = cur_y
 
-    # ── PASS 1: geometry – row height is driven by the TALLER of left/right steps
-    # Group steps into rows: a "left" step occupies a row by itself;
-    # a "right" step is paired with the left step at the same row index.
-    # Strategy: each step has its own row (simpler, matches row-based table lines).
-    row_data = []
+    # ── PASS 1: pair steps into rows ─────────────────────────────────────────
+    # A "right" step shares a row with the nearest preceding "left" step that
+    # hasn't already been paired. This lets left+right shapes sit side-by-side.
+    # Each row is: {"left_idx", "right_idx", "ROW_H", "ry"}
+    # step_to_row[step_idx] = row_idx  (for side-column text merge)
+
+    paired_rows = []   # list of {"left": idx_or_None, "right": idx_or_None}
+    step_to_pair = {}  # step_idx → pair_idx
+
+    for idx, step in enumerate(steps):
+        col = step.get("column", "left")
+        if col == "right":
+            # Pair with last unpaired left row
+            paired = False
+            for pi in range(len(paired_rows) - 1, -1, -1):
+                if paired_rows[pi]["right"] is None:
+                    paired_rows[pi]["right"] = idx
+                    step_to_pair[idx] = pi
+                    paired = True
+                    break
+            if not paired:
+                # No unpaired left row — create a new row with only right
+                paired_rows.append({"left": None, "right": idx})
+                step_to_pair[idx] = len(paired_rows) - 1
+        else:
+            paired_rows.append({"left": idx, "right": None})
+            step_to_pair[idx] = len(paired_rows) - 1
+
+    # Compute row heights and Y positions
+    row_geom = []   # list of {"ry", "ROW_H"} per pair
     scan_y = cur_y
-    for step in steps:
-        sh_h  = SHAPE_H.get(step["shape"], 9*mm)
-        ROW_H = sh_h + 2 * V_PAD
-        ry    = scan_y - ROW_H
-        row_data.append({"ry": ry, "ROW_H": ROW_H, "step": step})
+    for pair in paired_rows:
+        h_left  = SHAPE_H.get(steps[pair["left"]]["shape"],  9*mm) if pair["left"]  is not None else 0
+        h_right = SHAPE_H.get(steps[pair["right"]]["shape"], 9*mm) if pair["right"] is not None else 0
+        ROW_H = max(h_left, h_right) + 2 * V_PAD
+        ry = scan_y - ROW_H
+        row_geom.append({"ry": ry, "ROW_H": ROW_H})
         scan_y = ry
     table_bottom = scan_y
 
     # ── PASS 2: table structure ─────────────────────────────────────────────
-    row_bottoms = [rd["ry"] for rd in row_data]
+    row_bottoms = [rg["ry"] for rg in row_geom]
     draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_bottoms)
 
-    # ── PASS 3: side column text ────────────────────────────────────────────
-    for rd in row_data:
-        ry, ROW_H, step = rd["ry"], rd["ROW_H"], rd["step"]
+    # ── PASS 3: side column text (use left step's data for the shared row) ──
+    for pi, pair in enumerate(paired_rows):
+        rg   = row_geom[pi]
+        ry, ROW_H = rg["ry"], rg["ROW_H"]
+        # prefer left step for side-column data; fall back to right
+        ref_idx = pair["left"] if pair["left"] is not None else pair["right"]
+        step = steps[ref_idx]
         for col_i, key in [(0,"input_label"),(2,"output_label"),
                            (3,"responsible"),(4,"doc_format"),(5,"measurement")]:
             txt = step.get(key,"")
@@ -402,37 +429,39 @@ def generate_pdf(steps, meta):
                 cw = XS[col_i+1] - XS[col_i]
                 draw_centered_text(c, txt, XS[col_i]+cw/2, ry+ROW_H/2, cw-4, font_size=6.5)
 
-    # ── PASS 4: build a position lookup (step_index → anchor points) ────────
-    # anchor = {"cx","cy","top","bot","left","right","mid"}
+    # ── PASS 4: build anchor lookup (step_index → pixel coords) ─────────────
     anchors = {}
-    for idx, rd in enumerate(row_data):
-        ry, ROW_H, step = rd["ry"], rd["ROW_H"], rd["step"]
-        sh_h    = SHAPE_H.get(step["shape"], 9*mm)
+    for idx, step in enumerate(steps):
+        pi      = step_to_pair[idx]
+        rg      = row_geom[pi]
+        ry, ROW_H = rg["ry"], rg["ROW_H"]
         col     = step.get("column", "left")
-        sh_bot  = ry + V_PAD
-        sh_top  = sh_bot + sh_h
-        sh_mid  = sh_bot + sh_h / 2
+        sh_h    = SHAPE_H.get(step["shape"], 9*mm)
 
         if col == "right":
-            cx  = RIGHT_CX
+            cx   = RIGHT_CX
             sh_w = SH_W_R
         else:
-            cx  = LEFT_CX
+            cx   = LEFT_CX
             sh_w = SH_W_L
-        sh_x = cx - sh_w / 2
+
+        sh_x   = cx - sh_w / 2
+        sh_bot = ry + V_PAD
+        sh_top = sh_bot + sh_h
+        sh_mid = sh_bot + sh_h / 2
 
         anchors[idx] = {
-            "cx":    cx,
-            "cy":    sh_mid,
-            "top":   sh_top,
-            "bot":   sh_bot,
-            "left":  sh_x,
-            "right": sh_x + sh_w,
-            "sh_x":  sh_x,
-            "sh_w":  sh_w,
-            "sh_h":  sh_h,
+            "cx":     cx,
+            "cy":     sh_mid,
+            "top":    sh_top,
+            "bot":    sh_bot,
+            "left":   sh_x,
+            "right":  sh_x + sh_w,
+            "sh_x":   sh_x,
+            "sh_w":   sh_w,
+            "sh_h":   sh_h,
             "sh_bot": sh_bot,
-            "col":   col,
+            "col":    col,
         }
 
     # ── PASS 5: draw arrows ─────────────────────────────────────────────────
@@ -440,8 +469,7 @@ def generate_pdf(steps, meta):
     RED   = colors.HexColor("#CC0000")
     BLUE  = colors.HexColor("#1a6dcc")
 
-    for idx, rd in enumerate(row_data):
-        step = rd["step"]
+    for idx, step in enumerate(steps):
         a    = anchors[idx]
         col  = a["col"]
 
@@ -461,8 +489,9 @@ def generate_pdf(steps, meta):
             if 0 <= src_idx < len(anchors):
                 s = anchors[src_idx]
                 if connect_side == "right side →":
+                    # Use actual right tip of diamond, or bounding-box right for rect/oval
                     sx, sy = s["right"], s["cy"]
-                    # horizontal then down
+                    # Arrow goes: right from source → down to target top
                     draw_elbow_arrow(c, sx, sy, a["cx"], a["top"],
                                      color=arr_color, label=arrow_label, label_color=lbl_color)
                 elif connect_side == "left side ←":
@@ -485,12 +514,11 @@ def generate_pdf(steps, meta):
                         draw_elbow_arrow(c, sx, sy, a["cx"], a["top"],
                                          color=arr_color, label=arrow_label, label_color=lbl_color)
         else:
-            # Auto: draw arrow from shape directly above (same column only)
+            # Auto: draw arrow from the nearest step ABOVE in the same column
             if idx > 0:
-                # find the most recent shape in the same column above this one
                 prev_same = None
                 for pi in range(idx - 1, -1, -1):
-                    if anchors[pi]["col"] == col and row_data[pi]["step"].get("connect_from","") == "":
+                    if anchors[pi]["col"] == col:
                         prev_same = pi
                         break
                 if prev_same is not None:
@@ -528,8 +556,7 @@ def generate_pdf(steps, meta):
                 c.setStrokeColor(colors.black)
 
     # ── PASS 6: draw shapes ──────────────────────────────────────────────────
-    for idx, rd in enumerate(row_data):
-        step = rd["step"]
+    for idx, step in enumerate(steps):
         a    = anchors[idx]
         sh_x, sh_bot = a["sh_x"], a["sh_bot"]
         sh_w, sh_h   = a["sh_w"],  a["sh_h"]
