@@ -1,534 +1,1189 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import io
-import datetime
-from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas as rl_canvas
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
+import json
+import math
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.pdfgen import canvas
+from reportlab.lib import colors
+from reportlab.lib.units import mm
 
-st.set_page_config(page_title="Line Supply SOP", page_icon="🏭", layout="wide")
+st.set_page_config(page_title="SOP Builder", layout="wide")
 
-st.markdown("""
+# ─── Session State ────────────────────────────────────────────────────────────
+defaults = {
+    "steps": [],
+    "sop_no": "SCM/STR/LS/02",
+    "rev_no": "0.0",
+    "date": "26-12-2024",
+    "page_info": "1 OUT OF 1",
+    "unit": "Chakan Plant",
+    "area": "Stores",
+    "sub_area": "Line Side",
+    "zone": "DIRECT LOCATIONS",
+    "title": "Direct Supply of Parts from Stores to Assy Line",
+    "purpose": "Supply of Supplier Packs to Line Side",
+    "scope": "All Parts under direct supply category (suggested by quality/operation)",
+    "owner": "Stores Manager",
+    "company_name": "PINNACLE MOBILITY",
+    "composed_by": "Agilomatrix Pvt Ltd (connectus@agilomatrix.com)",
+    "change_records": [
+        {"sno": "1", "date": "17-12-2024", "rev": "0.0", "desc": "Original Version",
+         "change_letter": "NA", "prepared": "Prince S", "reviewed": "Ajay G", "approved": "Vilas B"},
+    ],
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
+
+SHAPE_TYPES = {
+    "Process (Rectangle)": "rect",
+    "Decision (Diamond)":  "diamond",
+    "Oval / Terminator":   "oval",
+    "Parallelogram (I/O)": "parallelogram",
+    "Annotation Text":     "arrow_text",
+}
+
+COLUMN_OPTIONS       = ["left", "right"]
+CONNECT_SIDE_OPTIONS = ["bottom (default)", "right side →", "left side ←"]
+
+# ─── LIVE SVG FLOWCHART GENERATOR ─────────────────────────────────────────────
+
+def generate_svg_preview(steps):
+    """Generate an interactive SVG preview of the flowchart."""
+    if not steps:
+        return """
+        <div style="display:flex;align-items:center;justify-content:center;height:200px;
+                    color:#888;font-family:sans-serif;font-size:14px;
+                    border:2px dashed #ddd;border-radius:12px;margin:8px 0;">
+            <div style="text-align:center">
+                <div style="font-size:32px;margin-bottom:8px">🔷</div>
+                <div>Add steps to see your flowchart here</div>
+            </div>
+        </div>"""
+
+    # Layout constants
+    SVG_W      = 700
+    BOX_W_L    = 180   # left-column box width
+    BOX_W_R    = 180   # right-column box width
+    COL_L_CX   = 200   # left column centre x
+    COL_R_CX   = 500   # right column centre x
+
+    SHAPE_H = {
+        "rect":          60,
+        "oval":          50,
+        "parallelogram": 60,
+        "diamond":       80,
+        "arrow_text":    30,
+    }
+    V_GAP  = 28   # vertical gap between shapes
+    TOP_Y  = 40   # first shape top y
+
+    # ── PASS 1: pair steps into rows (same logic as PDF) ──────────────────
+    paired_rows   = []
+    step_to_pair  = {}
+
+    for idx, step in enumerate(steps):
+        col = step.get("column", "left")
+        if col == "right":
+            paired = False
+            for pi in range(len(paired_rows) - 1, -1, -1):
+                if paired_rows[pi]["right"] is None:
+                    paired_rows[pi]["right"] = idx
+                    step_to_pair[idx] = pi
+                    paired = True
+                    break
+            if not paired:
+                paired_rows.append({"left": None, "right": idx})
+                step_to_pair[idx] = len(paired_rows) - 1
+        else:
+            paired_rows.append({"left": idx, "right": None})
+            step_to_pair[idx] = len(paired_rows) - 1
+
+    # ── PASS 2: compute row heights and vertical positions ─────────────────
+    row_geom = []
+    cur_y    = TOP_Y
+    for pair in paired_rows:
+        h_l = SHAPE_H.get(steps[pair["left"]]["shape"],  60) if pair["left"]  is not None else 0
+        h_r = SHAPE_H.get(steps[pair["right"]]["shape"], 60) if pair["right"] is not None else 0
+        row_h = max(h_l, h_r)
+        row_geom.append({"y_top": cur_y, "row_h": row_h})
+        cur_y += row_h + V_GAP
+
+    SVG_H = cur_y + 40
+
+    # ── PASS 3: build anchor lookup ─────────────────────────────────────────
+    anchors = {}
+    for idx, step in enumerate(steps):
+        pi       = step_to_pair[idx]
+        rg       = row_geom[pi]
+        col      = step.get("column", "left")
+        sh_h     = SHAPE_H.get(step["shape"], 60)
+        cx       = COL_L_CX if col == "left" else COL_R_CX
+        bw       = BOX_W_L  if col == "left" else BOX_W_R
+        sh_top   = rg["y_top"]
+        sh_bot   = sh_top + sh_h
+        sh_mid_y = sh_top + sh_h / 2
+
+        anchors[idx] = {
+            "cx":    cx,
+            "cy":    sh_mid_y,
+            "top":   sh_top,
+            "bot":   sh_bot,
+            "left":  cx - bw / 2,
+            "right": cx + bw / 2,
+            "bw":    bw,
+            "bh":    sh_h,
+            "col":   col,
+        }
+
+    # ── Helpers ─────────────────────────────────────────────────────────────
+    def esc(t):
+        return str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+    def wrap_label(text, max_chars=22):
+        """Simple word-wrap returning list of lines."""
+        words  = str(text).split()
+        lines, cur = [], ""
+        for w in words:
+            trial = (cur + " " + w).strip()
+            if len(trial) <= max_chars:
+                cur = trial
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
+        return lines or [""]
+
+    def text_lines_svg(lines, cx, mid_y, font_size=11, bold=False, fill="#1a1a1a"):
+        """Render multiple centred lines."""
+        lh   = font_size + 3
+        total = len(lines) * lh
+        y0    = mid_y - total / 2 + lh * 0.75
+        weight = "600" if bold else "400"
+        out = ""
+        for i, line in enumerate(lines):
+            out += f'<text x="{cx}" y="{y0 + i*lh:.1f}" text-anchor="middle" ' \
+                   f'font-size="{font_size}" font-weight="{weight}" fill="{fill}" ' \
+                   f'font-family="\'Segoe UI\',sans-serif">{esc(line)}</text>'
+        return out
+
+    # ── PASS 4: draw arrows ──────────────────────────────────────────────────
+    arrow_svg = ""
+    ARROW_COLOR  = "#4a5568"
+    YES_COLOR    = "#276749"
+    NO_COLOR     = "#c53030"
+
+    def arrowhead_d(tx, ty, direction="down"):
+        sz = 5
+        if direction == "down":
+            return f"M{tx},{ty} L{tx-sz},{ty-sz*1.5} L{tx+sz},{ty-sz*1.5} Z"
+        elif direction == "right":
+            return f"M{tx},{ty} L{tx-sz*1.5},{ty-sz} L{tx-sz*1.5},{ty+sz} Z"
+        elif direction == "left":
+            return f"M{tx},{ty} L{tx+sz*1.5},{ty-sz} L{tx+sz*1.5},{ty+sz} Z"
+        else:  # up
+            return f"M{tx},{ty} L{tx-sz},{ty+sz*1.5} L{tx+sz},{ty+sz*1.5} Z"
+
+    for idx, step in enumerate(steps):
+        a   = anchors[idx]
+        lbl = step.get("arrow_label", "").strip()
+        lbl_upper = lbl.upper()
+        col = "YES" if lbl_upper == "YES" else ("NO" if lbl_upper == "NO" else "")
+        ac  = YES_COLOR if col == "YES" else (NO_COLOR if col == "NO" else ARROW_COLOR)
+
+        connect_from = step.get("connect_from", "")
+        connect_side = step.get("connect_side", "bottom (default)")
+
+        if connect_from != "" and str(connect_from).isdigit():
+            src = int(connect_from)
+            if 0 <= src < len(anchors):
+                s = anchors[src]
+                if connect_side == "right side →":
+                    sx, sy = s["right"], s["cy"]
+                    ex, ey = a["cx"], a["top"]
+                    # L-shaped: horizontal then vertical
+                    mid_x = (sx + ex) / 2
+                    arrow_svg += f'<path d="M{sx},{sy} L{ex},{sy} L{ex},{ey}" ' \
+                                 f'fill="none" stroke="{ac}" stroke-width="1.5" stroke-linejoin="round"/>'
+                    arrow_svg += f'<path d="{arrowhead_d(ex, ey, "down")}" fill="{ac}"/>'
+                elif connect_side == "left side ←":
+                    sx, sy = s["left"], s["cy"]
+                    ex, ey = a["cx"], a["top"]
+                    arrow_svg += f'<path d="M{sx},{sy} L{ex},{sy} L{ex},{ey}" ' \
+                                 f'fill="none" stroke="{ac}" stroke-width="1.5" stroke-linejoin="round"/>'
+                    arrow_svg += f'<path d="{arrowhead_d(ex, ey, "down")}" fill="{ac}"/>'
+                else:
+                    sx, sy = s["cx"], s["bot"]
+                    ex, ey = a["cx"], a["top"]
+                    if abs(sx - ex) < 2:
+                        arrow_svg += f'<line x1="{sx}" y1="{sy}" x2="{ex}" y2="{ey}" ' \
+                                     f'stroke="{ac}" stroke-width="1.5"/>'
+                        arrow_svg += f'<path d="{arrowhead_d(ex, ey, "down")}" fill="{ac}"/>'
+                    else:
+                        mid_y_e = (sy + ey) / 2
+                        arrow_svg += f'<path d="M{sx},{sy} L{sx},{mid_y_e} L{ex},{mid_y_e} L{ex},{ey}" ' \
+                                     f'fill="none" stroke="{ac}" stroke-width="1.5" stroke-linejoin="round"/>'
+                        arrow_svg += f'<path d="{arrowhead_d(ex, ey, "down")}" fill="{ac}"/>'
+                if lbl:
+                    mx = (sx + ex) / 2 if connect_side == "bottom (default)" else sx + 20
+                    my = (sy + ey) / 2 - 4
+                    arrow_svg += f'<rect x="{mx-18}" y="{my-9}" width="36" height="13" rx="3" ' \
+                                 f'fill="white" stroke="{ac}" stroke-width="0.6" opacity="0.92"/>'
+                    arrow_svg += f'<text x="{mx}" y="{my+1}" text-anchor="middle" font-size="9" ' \
+                                 f'font-weight="700" fill="{ac}" font-family="\'Segoe UI\',sans-serif">{esc(lbl)}</text>'
+        else:
+            # auto: connect from nearest above in same column
+            if idx > 0:
+                prev = None
+                for pi in range(idx - 1, -1, -1):
+                    if anchors[pi]["col"] == a["col"]:
+                        prev = pi
+                        break
+                if prev is not None:
+                    ps = anchors[prev]
+                    arrow_svg += f'<line x1="{a["cx"]}" y1="{ps["bot"]}" x2="{a["cx"]}" y2="{a["top"]}" ' \
+                                 f'stroke="{ARROW_COLOR}" stroke-width="1.5"/>'
+                    arrow_svg += f'<path d="{arrowhead_d(a["cx"], a["top"], "down")}" fill="{ARROW_COLOR}"/>'
+
+        # loop-back arrow
+        loop_to    = step.get("loop_to", "")
+        loop_label = step.get("loop_label", "").strip()
+        if loop_to != "" and str(loop_to).isdigit():
+            lt = int(loop_to)
+            if 0 <= lt < len(anchors):
+                dest  = anchors[lt]
+                lc    = YES_COLOR if loop_label.upper() == "YES" else (NO_COLOR if loop_label.upper() == "NO" else "#1a6dcc")
+                lx    = a["left"] - 22
+                arrow_svg += f'<path d="M{a["left"]},{a["cy"]} L{lx},{a["cy"]} L{lx},{dest["cy"]} L{dest["left"]},{dest["cy"]}" ' \
+                             f'fill="none" stroke="{lc}" stroke-width="1.5" stroke-dasharray="4 2" stroke-linejoin="round"/>'
+                arrow_svg += f'<path d="{arrowhead_d(dest["left"], dest["cy"], "right")}" fill="{lc}"/>'
+                if loop_label:
+                    my = (a["cy"] + dest["cy"]) / 2
+                    arrow_svg += f'<text x="{lx-4}" y="{my}" text-anchor="end" font-size="9" ' \
+                                 f'font-weight="700" fill="{lc}" font-family="\'Segoe UI\',sans-serif">{esc(loop_label)}</text>'
+
+    # ── PASS 5: draw shapes ──────────────────────────────────────────────────
+    shape_svg = ""
+
+    COLORS = {
+        "rect":          {"fill": "#EBF4FF", "stroke": "#2B6CB0", "text": "#1A365D"},
+        "oval":          {"fill": "#2D3748", "stroke": "#1A202C", "text": "#FFFFFF"},
+        "diamond":       {"fill": "#FFF9E6", "stroke": "#B7791F", "text": "#744210"},
+        "parallelogram": {"fill": "#F0FFF4", "stroke": "#276749", "text": "#1C4532"},
+        "arrow_text":    {"fill": "none",    "stroke": "none",    "text": "#4A5568"},
+    }
+
+    for idx, step in enumerate(steps):
+        a     = anchors[idx]
+        shape = step["shape"]
+        cx, cy = a["cx"], a["cy"]
+        bw, bh = a["bw"], a["bh"]
+        x0    = cx - bw / 2
+        y0    = a["top"]
+        clr   = COLORS.get(shape, COLORS["rect"])
+        lines = wrap_label(step["text"])
+        tip   = f"Step {idx+1}: {step['text']}"
+
+        shape_svg += f'<g class="sop-node" data-step="{idx}">'
+
+        if shape == "rect":
+            shape_svg += f'<rect x="{x0}" y="{y0}" width="{bw}" height="{bh}" rx="8" ' \
+                         f'fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
+            shape_svg += text_lines_svg(lines, cx, cy, font_size=11, fill=clr["text"])
+
+        elif shape == "oval":
+            shape_svg += f'<ellipse cx="{cx}" cy="{cy}" rx="{bw/2}" ry="{bh/2}" ' \
+                         f'fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
+            shape_svg += text_lines_svg(lines, cx, cy, font_size=11, fill=clr["text"])
+
+        elif shape == "diamond":
+            pts = f"{cx},{y0} {cx+bw/2},{cy} {cx},{y0+bh} {cx-bw/2},{cy}"
+            shape_svg += f'<polygon points="{pts}" fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
+            shape_svg += text_lines_svg(lines, cx, cy, font_size=10, fill=clr["text"])
+            # YES / NO labels
+            yes_l = step.get("yes_label", "YES") or "YES"
+            no_l  = step.get("no_label",  "NO")  or "NO"
+            shape_svg += f'<text x="{cx + bw/2 + 6}" y="{cy+4}" font-size="9" font-weight="700" ' \
+                         f'fill="{YES_COLOR}" font-family="\'Segoe UI\',sans-serif">{esc(yes_l)} →</text>'
+            shape_svg += f'<text x="{cx - bw/2 - 6}" y="{cy+4}" font-size="9" font-weight="700" ' \
+                         f'text-anchor="end" fill="{NO_COLOR}" font-family="\'Segoe UI\',sans-serif">← {esc(no_l)}</text>'
+
+        elif shape == "parallelogram":
+            skew = 10
+            pts  = f"{x0+skew},{y0} {x0+bw},{y0} {x0+bw-skew},{y0+bh} {x0},{y0+bh}"
+            shape_svg += f'<polygon points="{pts}" fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
+            shape_svg += text_lines_svg(lines, cx, cy, font_size=11, fill=clr["text"])
+
+        elif shape == "arrow_text":
+            shape_svg += f'<text x="{cx}" y="{cy+4}" text-anchor="middle" font-size="11" ' \
+                         f'fill="{clr["text"]}" font-style="italic" font-family="\'Segoe UI\',sans-serif">{esc(step["text"])}</text>'
+
+        # Step number badge
+        shape_svg += f'<circle cx="{x0+12}" cy="{y0+12}" r="9" fill="{clr["stroke"]}" opacity="0.9"/>'
+        shape_svg += f'<text x="{x0+12}" y="{y0+16}" text-anchor="middle" font-size="9" ' \
+                     f'font-weight="700" fill="white" font-family="\'Segoe UI\',sans-serif">{idx+1}</text>'
+
+        shape_svg += '</g>'
+
+    # ── Column headers ───────────────────────────────────────────────────────
+    has_right = any(s.get("column", "left") == "right" for s in steps)
+    header_svg = ""
+    header_svg += f'<rect x="30" y="6" width="{BOX_W_L+40}" height="22" rx="5" fill="#EBF4FF" stroke="#2B6CB0" stroke-width="0.8"/>'
+    header_svg += f'<text x="{COL_L_CX}" y="21" text-anchor="middle" font-size="11" font-weight="600" ' \
+                  f'fill="#1A365D" font-family="\'Segoe UI\',sans-serif">Main Flow (Left)</text>'
+    if has_right:
+        header_svg += f'<rect x="{COL_R_CX-BOX_W_R/2-20}" y="6" width="{BOX_W_R+40}" height="22" rx="5" fill="#F0FFF4" stroke="#276749" stroke-width="0.8"/>'
+        header_svg += f'<text x="{COL_R_CX}" y="21" text-anchor="middle" font-size="11" font-weight="600" ' \
+                      f'fill="#1C4532" font-family="\'Segoe UI\',sans-serif">Branch (Right)</text>'
+
+    # ── Column divider ───────────────────────────────────────────────────────
+    divider_svg = ""
+    if has_right:
+        mid_x = (COL_L_CX + BOX_W_L/2 + COL_R_CX - BOX_W_R/2) / 2
+        divider_svg = f'<line x1="{mid_x}" y1="32" x2="{mid_x}" y2="{SVG_H-10}" ' \
+                      f'stroke="#CBD5E0" stroke-width="1" stroke-dasharray="5 4"/>'
+
+    # ── Legend ───────────────────────────────────────────────────────────────
+    legend_x = SVG_W - 130
+    legend_y = TOP_Y
+    legend_items = [
+        ("rect",          "#EBF4FF", "#2B6CB0", "Process"),
+        ("oval",          "#2D3748", "#1A202C", "Terminator"),
+        ("diamond",       "#FFF9E6", "#B7791F", "Decision"),
+        ("parallelogram", "#F0FFF4", "#276749", "Input/Output"),
+    ]
+    legend_svg = f'<rect x="{legend_x-8}" y="{legend_y-8}" width="126" height="{len(legend_items)*22+16}" ' \
+                 f'rx="8" fill="white" stroke="#CBD5E0" stroke-width="0.8" opacity="0.95"/>'
+    legend_svg += f'<text x="{legend_x+4}" y="{legend_y+6}" font-size="10" font-weight="600" ' \
+                  f'fill="#4A5568" font-family="\'Segoe UI\',sans-serif">Legend</text>'
+    for i, (sh, fill, stroke, label) in enumerate(legend_items):
+        ly = legend_y + 20 + i * 22
+        lx = legend_x + 4
+        if sh in ("rect", "parallelogram"):
+            legend_svg += f'<rect x="{lx}" y="{ly-8}" width="20" height="14" rx="3" fill="{fill}" stroke="{stroke}" stroke-width="1"/>'
+        elif sh == "oval":
+            legend_svg += f'<ellipse cx="{lx+10}" cy="{ly}" rx="10" ry="7" fill="{fill}" stroke="{stroke}" stroke-width="1"/>'
+        elif sh == "diamond":
+            legend_svg += f'<polygon points="{lx+10},{ly-8} {lx+20},{ly} {lx+10},{ly+8} {lx},{ly}" fill="{fill}" stroke="{stroke}" stroke-width="1"/>'
+        legend_svg += f'<text x="{lx+26}" y="{ly+4}" font-size="10" fill="#4A5568" font-family="\'Segoe UI\',sans-serif">{label}</text>'
+
+    full_svg = f"""
+    <svg width="{SVG_W}" height="{SVG_H}" viewBox="0 0 {SVG_W} {SVG_H}"
+         xmlns="http://www.w3.org/2000/svg" style="font-family:'Segoe UI',sans-serif;">
+      <style>
+        .sop-node {{ cursor:pointer; transition: opacity 0.15s; }}
+        .sop-node:hover {{ opacity: 0.85; }}
+        .sop-node:hover rect, .sop-node:hover ellipse, .sop-node:hover polygon {{
+          filter: drop-shadow(0 2px 6px rgba(0,0,0,0.18));
+        }}
+      </style>
+      <defs>
+        <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
+          <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#F0F4F8" stroke-width="0.5"/>
+        </pattern>
+      </defs>
+      <rect width="{SVG_W}" height="{SVG_H}" fill="#FAFBFC"/>
+      <rect width="{SVG_W}" height="{SVG_H}" fill="url(#grid)"/>
+      {header_svg}
+      {divider_svg}
+      {arrow_svg}
+      {shape_svg}
+      {legend_svg}
+    </svg>"""
+    return full_svg
+
+
+def render_preview_html(steps):
+    """Wrap SVG in a scrollable, zoomable HTML widget."""
+    svg = generate_svg_preview(steps)
+    step_count = len(steps)
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-.main-header {
-    background: linear-gradient(135deg, #003366 0%, #0055aa 100%);
-    color: white; padding: 18px 28px; border-radius: 10px; margin-bottom: 22px;
-}
-.main-header h2 { margin:0; font-size:20px; font-weight:700; }
-.main-header p  { margin:4px 0 0; font-size:12px; opacity:.8; }
-.section-box {
-    background: white; border: 1px solid #dde3ec;
-    border-top: 4px solid #0055aa; border-radius: 8px;
-    padding: 18px 20px; margin-bottom: 18px;
-    box-shadow: 0 2px 6px rgba(0,0,0,.06);
-}
-.section-title { font-size:14px; font-weight:700; color:#003366; margin-bottom:12px; }
-.flow-step {
-    background:#f0f6ff; border-left:4px solid #0055aa;
-    border-radius:5px; padding:10px 14px; margin:6px 0; font-size:13px;
-}
-.flow-decision {
-    background:#fdf5ff; border-left:4px solid #7c3aed;
-    border-radius:5px; padding:10px 14px; margin:6px 0; font-size:13px;
-}
-.flow-arrow { text-align:center; color:#aaa; font-size:16px; margin:2px 0; }
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: #F7F9FC; font-family: 'Segoe UI', sans-serif; overflow: hidden; }}
+  #toolbar {{
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 14px; background: white;
+    border-bottom: 1px solid #E2E8F0;
+    font-size: 12px; color: #4A5568;
+  }}
+  #toolbar strong {{ color: #1A365D; font-size: 13px; }}
+  #zoom-controls {{ display:flex; gap:4px; align-items:center; margin-left:auto; }}
+  .zbtn {{
+    background: #EBF4FF; border: 1px solid #BEE3F8; color: #2B6CB0;
+    border-radius: 5px; padding: 3px 9px; cursor: pointer; font-size: 13px;
+    font-weight: 600; line-height: 1.4; transition: background 0.15s;
+  }}
+  .zbtn:hover {{ background: #BEE3F8; }}
+  #zoom-label {{ font-size: 11px; color: #718096; min-width: 38px; text-align:center; }}
+  #canvas-wrap {{
+    width: 100%; height: calc(100vh - 44px);
+    overflow: auto; position: relative;
+    background: #F7F9FC;
+  }}
+  #svg-inner {{
+    display: inline-block;
+    transform-origin: top left;
+    transition: transform 0.18s ease;
+    padding: 10px;
+  }}
+  .badge {{
+    background: #2B6CB0; color: white;
+    border-radius: 12px; padding: 2px 10px;
+    font-size: 11px; font-weight: 600;
+    margin-left: 6px;
+  }}
 </style>
-""", unsafe_allow_html=True)
-
-st.markdown("""
-<div class="main-header">
-  <h2>🏭 Line Supply SOP — Direct Supply of Parts from Stores to Assy Line</h2>
-  <p>Fill in all fields below, then generate your PDF & Excel report for download.</p>
+</head>
+<body>
+<div id="toolbar">
+  <strong>📊 Live Flowchart Preview</strong>
+  <span class="badge">{step_count} step{'s' if step_count != 1 else ''}</span>
+  <span style="color:#718096">| Scroll to pan • Use buttons to zoom</span>
+  <div id="zoom-controls">
+    <button class="zbtn" onclick="zoom(-0.15)">−</button>
+    <span id="zoom-label">100%</span>
+    <button class="zbtn" onclick="zoom(+0.15)">+</button>
+    <button class="zbtn" onclick="resetZoom()" style="font-size:11px;padding:3px 8px">Reset</button>
+  </div>
 </div>
-""", unsafe_allow_html=True)
+<div id="canvas-wrap">
+  <div id="svg-inner">
+    {svg}
+  </div>
+</div>
+<script>
+  var scale = 1;
+  function zoom(delta) {{
+    scale = Math.max(0.3, Math.min(2.5, scale + delta));
+    document.getElementById('svg-inner').style.transform = 'scale(' + scale + ')';
+    document.getElementById('zoom-label').textContent = Math.round(scale*100) + '%';
+  }}
+  function resetZoom() {{
+    scale = 1;
+    document.getElementById('svg-inner').style.transform = 'scale(1)';
+    document.getElementById('zoom-label').textContent = '100%';
+  }}
+</script>
+</body>
+</html>"""
+    return html
 
-# ── SECTION 1: SOP Header ────────────────────────────────────────────────────
-st.markdown('<div class="section-box"><div class="section-title">📄 Section 1: SOP Header Information</div>', unsafe_allow_html=True)
-c1,c2,c3,c4 = st.columns(4)
-with c1:
-    company  = st.text_input("Company Name",  value="PINNACLE MOBILITY")
-    sop_no   = st.text_input("SOP No.",        value="SCM/STR/LS/02")
-with c2:
-    brand    = st.text_input("Brand / Logo",   value="eka")
-    rev_no   = st.text_input("Rev No.",        value="0.0")
-with c3:
-    unit     = st.text_input("Unit",           value="Chakan Plant")
-    area     = st.text_input("Area",           value="Stores")
-with c4:
-    sub_area = st.text_input("Sub Area",       value="Line Side")
-    zone     = st.text_input("Zone",           value="DIRECT LOCATIONS")
+# ─── PDF Text Helpers ─────────────────────────────────────────────────────────
+def wrapped_lines(c, text, max_w, font_name, font_size):
+    words = str(text).split()
+    lines, cur = [], ""
+    for w in words:
+        test = (cur + " " + w).strip()
+        if c.stringWidth(test, font_name, font_size) <= max_w:
+            cur = test
+        else:
+            if cur:
+                lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines if lines else [""]
 
-c5,c6 = st.columns(2)
-with c5:
-    sop_date  = st.date_input("SOP Date",  value=datetime.date(2024,12,26))
-    page_info = st.text_input("Page Info", value="1 OUT OF 1")
-with c6:
-    purpose   = st.text_input("Purpose",   value="Supply of Supplier Packs to Line Side")
-    scope     = st.text_area("Scope",      value="All Parts under direct supply category ( suggested by quality/operation)", height=70)
-st.markdown('</div>', unsafe_allow_html=True)
+def draw_centered_text(c, text, cx, cy, max_w,
+                       font_name="Helvetica", font_size=7, color=colors.black):
+    lines = wrapped_lines(c, text, max_w, font_name, font_size)
+    line_h = font_size + 1.5
+    total_h = len(lines) * line_h
+    start_y = cy + total_h / 2 - line_h * 0.7
+    c.setFont(font_name, font_size)
+    c.setFillColor(color)
+    for i, line in enumerate(lines):
+        c.drawCentredString(cx, start_y - i * line_h, line)
 
-# ── SECTION 2: Process Owner ─────────────────────────────────────────────────
-st.markdown('<div class="section-box"><div class="section-title">👤 Section 2: Process Owner</div>', unsafe_allow_html=True)
-c1,c2,c3 = st.columns(3)
-with c1: owner           = st.text_input("Process Owner",        value="Stores Manager")
-with c2: responsible     = st.text_input("Responsible Person",   value="Line Supervisor")
-with c3: target_coverage = st.number_input("MTRL Coverage Target (%)", min_value=1, max_value=100, value=100)
-st.markdown('</div>', unsafe_allow_html=True)
+def draw_left_text(c, text, x, cy, max_w,
+                   font_name="Helvetica", font_size=6.5, color=colors.black):
+    lines = wrapped_lines(c, text, max_w, font_name, font_size)
+    line_h = font_size + 1.5
+    total_h = len(lines) * line_h
+    start_y = cy + total_h / 2 - line_h * 0.7
+    c.setFont(font_name, font_size)
+    c.setFillColor(color)
+    for i, line in enumerate(lines):
+        c.drawString(x, start_y - i * line_h, line)
 
-# ── SECTION 3: Parts ─────────────────────────────────────────────────────────
-st.markdown('<div class="section-box"><div class="section-title">🔩 Section 3: Part Details & Coverage</div>', unsafe_allow_html=True)
-st.caption("Add each part with its availability status. This drives the process flow decisions.")
+# ─── Arrow Drawing ────────────────────────────────────────────────────────────
+def arrowhead(c, tip_x, tip_y, direction="down"):
+    size = 3.5
+    c.setFillColor(colors.black)
+    p = c.beginPath()
+    if direction == "down":
+        p.moveTo(tip_x, tip_y)
+        p.lineTo(tip_x - size, tip_y + size * 1.5)
+        p.lineTo(tip_x + size, tip_y + size * 1.5)
+    elif direction == "up":
+        p.moveTo(tip_x, tip_y)
+        p.lineTo(tip_x - size, tip_y - size * 1.5)
+        p.lineTo(tip_x + size, tip_y - size * 1.5)
+    elif direction == "right":
+        p.moveTo(tip_x, tip_y)
+        p.lineTo(tip_x - size * 1.5, tip_y + size)
+        p.lineTo(tip_x - size * 1.5, tip_y - size)
+    elif direction == "left":
+        p.moveTo(tip_x, tip_y)
+        p.lineTo(tip_x + size * 1.5, tip_y + size)
+        p.lineTo(tip_x + size * 1.5, tip_y - size)
+    p.close()
+    c.drawPath(p, fill=1, stroke=0)
 
-if "parts" not in st.session_state:
-    st.session_state.parts = [{"part_no":"","part_name":"","supplier":"","n_available":"Yes",
-                                "n1_available":"Yes","shortfall":"","location":"","trolley_available":"Yes"}]
+def draw_arrow_down(c, x, y_from, y_to, color=colors.black):
+    c.setStrokeColor(color); c.setLineWidth(0.8)
+    size = 3.5
+    c.line(x, y_from, x, y_to + size * 1.5)
+    arrowhead(c, x, y_to, "down")
+    c.setStrokeColor(colors.black)
 
-def add_part():    st.session_state.parts.append({"part_no":"","part_name":"","supplier":"","n_available":"Yes","n1_available":"Yes","shortfall":"","location":"","trolley_available":"Yes"})
-def remove_part(i): st.session_state.parts.pop(i)
+def draw_arrow_right(c, x_from, x_to, y, color=colors.black, label="", label_color=colors.black):
+    c.setStrokeColor(color); c.setLineWidth(0.8)
+    size = 3.5
+    c.line(x_from, y, x_to - size * 1.5, y)
+    arrowhead(c, x_to, y, "right")
+    if label:
+        mid_x = (x_from + x_to) / 2
+        c.setFont("Helvetica-Bold", 6); c.setFillColor(label_color)
+        c.drawCentredString(mid_x, y + 2.5, label)
+    c.setStrokeColor(colors.black); c.setFillColor(colors.black)
 
-for i, part in enumerate(st.session_state.parts):
-    with st.expander(f"Part {i+1}: {part['part_name'] or 'New Part'}", expanded=(i==0)):
-        r1,r2,r3 = st.columns(3)
-        with r1: st.session_state.parts[i]["part_no"]            = st.text_input("Part No.",          value=part["part_no"],            key=f"pno_{i}")
-        with r2: st.session_state.parts[i]["part_name"]          = st.text_input("Part Name",         value=part["part_name"],          key=f"pnm_{i}")
-        with r3: st.session_state.parts[i]["supplier"]           = st.text_input("Supplier",          value=part["supplier"],           key=f"sup_{i}")
-        a1,a2,a3,a4 = st.columns(4)
-        with a1: st.session_state.parts[i]["n_available"]        = st.selectbox("Available N Day?",   ["Yes","No"], index=0 if part["n_available"]=="Yes" else 1, key=f"nav_{i}")
-        with a2: st.session_state.parts[i]["n1_available"]       = st.selectbox("Available N+1 Day?", ["Yes","No"], index=0 if part["n1_available"]=="Yes" else 1, key=f"n1v_{i}")
-        with a3: st.session_state.parts[i]["trolley_available"]  = st.selectbox("In Loaded Trolley?", ["Yes","No"], index=0 if part["trolley_available"]=="Yes" else 1, key=f"tav_{i}")
-        with a4: st.session_state.parts[i]["shortfall"]          = st.text_input("Shortfall Qty",     value=part["shortfall"],          key=f"sfl_{i}")
-        st.session_state.parts[i]["location"] = st.text_input("Direct Part Location", value=part["location"], key=f"loc_{i}")
-        if st.button(f"🗑 Remove Part {i+1}", key=f"rm_{i}"):
-            remove_part(i); st.rerun()
+def draw_elbow_arrow(c, sx, sy, ex, ey, color=colors.black, label="", label_color=colors.black):
+    c.setStrokeColor(color); c.setLineWidth(0.8)
+    size = 3.5
+    c.line(sx, sy, ex, sy)
+    if ey < sy:
+        c.line(ex, sy, ex, ey + size * 1.5)
+        arrowhead(c, ex, ey, "down")
+    else:
+        c.line(ex, sy, ex, ey - size * 1.5)
+        arrowhead(c, ex, ey, "up")
+    if label:
+        c.setFont("Helvetica-Bold", 6); c.setFillColor(label_color)
+        lx = (sx + ex) / 2
+        c.drawCentredString(lx, sy + 2.5, label)
+    c.setStrokeColor(colors.black); c.setFillColor(colors.black)
 
-st.button("➕ Add Another Part", on_click=add_part)
-st.markdown('</div>', unsafe_allow_html=True)
+# ─── Shape Drawing ────────────────────────────────────────────────────────────
+def draw_rect_shape(c, x, y, w, h, text, font_size=7):
+    c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.8)
+    c.rect(x, y, w, h, fill=1, stroke=1)
+    draw_centered_text(c, text, x + w/2, y + h/2, w - 4, font_size=font_size)
 
-# ── SECTION 4: Change Record ──────────────────────────────────────────────────
-st.markdown('<div class="section-box"><div class="section-title">📝 Section 4: SOP Change Record</div>', unsafe_allow_html=True)
+def draw_oval_shape(c, x, y, w, h, text, font_size=7):
+    c.setStrokeColor(colors.black); c.setFillColor(colors.HexColor("#2c2c2c")); c.setLineWidth(0.8)
+    c.ellipse(x, y, x + w, y + h, fill=1, stroke=1)
+    draw_centered_text(c, text, x + w/2, y + h/2, w - 6, font_size=font_size, color=colors.white)
 
-if "changes" not in st.session_state:
-    st.session_state.changes = [{"eff_date":datetime.date(2024,12,17),"rev":"0.0","desc":"Original Version",
-                                  "change_letter":"NA","prepared":"Prince S","reviewed":"Ajay G","approved":"Vilas B"}]
+def draw_diamond_shape(c, x, y, w, h, text, font_size=6.5):
+    cx, cy = x + w/2, y + h/2
+    p = c.beginPath()
+    p.moveTo(cx, y + h); p.lineTo(x + w, cy); p.lineTo(cx, y); p.lineTo(x, cy)
+    p.close()
+    c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.8)
+    c.drawPath(p, fill=1, stroke=1)
+    draw_centered_text(c, text, cx, cy, w * 0.55, font_size=font_size)
 
-def add_change(): st.session_state.changes.append({"eff_date":datetime.date.today(),"rev":"","desc":"","change_letter":"","prepared":"","reviewed":"","approved":""})
-def rm_change(i): st.session_state.changes.pop(i)
+def draw_parallelogram_shape(c, x, y, w, h, text, font_size=7):
+    skew = 7
+    p = c.beginPath()
+    p.moveTo(x + skew, y + h); p.lineTo(x + w, y + h)
+    p.lineTo(x + w - skew, y); p.lineTo(x, y)
+    p.close()
+    c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.8)
+    c.drawPath(p, fill=1, stroke=1)
+    draw_centered_text(c, text, x + w/2, y + h/2, w - 10, font_size=font_size)
 
-for i, ch in enumerate(st.session_state.changes):
-    cc1,cc2,cc3,cc4,cc5,cc6,cc7,cc8 = st.columns([1.3,0.8,2,1,1,1,1,0.5])
-    with cc1: st.session_state.changes[i]["eff_date"]      = st.date_input("Effective Date", value=ch["eff_date"],   key=f"cd_{i}")
-    with cc2: st.session_state.changes[i]["rev"]           = st.text_input("Rev",            value=ch["rev"],        key=f"cr_{i}")
-    with cc3: st.session_state.changes[i]["desc"]          = st.text_input("Description",    value=ch["desc"],       key=f"cds_{i}")
-    with cc4: st.session_state.changes[i]["prepared"]      = st.text_input("Prepared By",    value=ch["prepared"],   key=f"cp_{i}")
-    with cc5: st.session_state.changes[i]["reviewed"]      = st.text_input("Reviewed By",    value=ch["reviewed"],   key=f"cvw_{i}")
-    with cc6: st.session_state.changes[i]["approved"]      = st.text_input("Approved By",    value=ch["approved"],   key=f"ca_{i}")
-    with cc7: st.session_state.changes[i]["change_letter"] = st.text_input("Change Letter",  value=ch.get("change_letter","NA"), key=f"cl_{i}")
-    with cc8:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🗑", key=f"rmc_{i}"): rm_change(i); st.rerun()
+# ─── Table Structure ──────────────────────────────────────────────────────────
+def draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_bottoms):
+    ML_x    = XS[0]
+    total_w = XS[-1] - XS[0]
+    total_h = table_top - table_bottom
+    c.setFillColor(colors.white)
+    c.rect(ML_x, table_bottom, total_w, total_h, fill=1, stroke=0)
+    c.setStrokeColor(colors.black); c.setLineWidth(0.8)
+    c.rect(ML_x, table_bottom, total_w, total_h, fill=0, stroke=1)
+    c.setLineWidth(0.5)
+    for x in XS[1:-1]:
+        c.line(x, table_bottom, x, table_top)
+    c.setLineWidth(0.4)
+    for row_bottom in row_bottoms[:-1]:
+        y = row_bottom
+        if FLOW_COL_IDX > 0:
+            c.line(XS[0], y, XS[FLOW_COL_IDX], y)
+        if FLOW_COL_IDX < len(XS) - 2:
+            c.line(XS[FLOW_COL_IDX + 1], y, XS[-1], y)
 
-st.button("➕ Add Change Record", on_click=add_change)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ── Process Flow Preview ──────────────────────────────────────────────────────
-with st.expander("🔍 Process Flow Preview", expanded=False):
-    st.markdown(f'<div class="flow-step">🔵 <b>START</b> — Production lay sequence for N+1 day</div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-arrow">↓</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="flow-step">📋 <b>Step 1</b> — Verify line side stock & Update Direct Coverage Sheet <span style="color:#888;font-size:11px;">({responsible})</span></div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-arrow">↓</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="flow-step">📋 <b>Step 2</b> — Check material coverage w.r.t. N (today) day plan <span style="color:#888;font-size:11px;">({responsible})</span></div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-arrow">↓</div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-decision">🔷 <b>Decision 1</b> — Is Part available for N day?<br><span style="color:green;">YES →</span> Check N+1 coverage &nbsp;|&nbsp; <span style="color:red;">NO →</span> Check Loaded Trolley Area</div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-arrow">↓ (YES)</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="flow-step">📋 Check material coverage w.r.t. N+1 (tomorrow) day plan <span style="color:#888;font-size:11px;">({responsible})</span></div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-arrow">↓</div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-decision">🔷 <b>Decision 2</b> — Is Part available for N+1 day?<br><span style="color:green;">YES →</span> Continue &nbsp;|&nbsp; <span style="color:red;">NO →</span> Check Loaded Trolley</div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-arrow">↓ (NO from D1 or D2)</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="flow-step">📋 <b>Step 3</b> — Check part availability in Loaded Trolley Area <span style="color:#888;font-size:11px;">({responsible})</span></div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-arrow">↓</div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-decision">🔷 <b>Decision 3</b> — Is available in Loaded Trolley Area?<br><span style="color:green;">YES (A) →</span> Move Trolley & Update Bincard &nbsp;|&nbsp; <span style="color:red;">NO (B) →</span> Inform Responsible Person</div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-arrow">↓</div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-decision">🔷 <b>Decision 4</b> — Any more shortfall?<br><span style="color:green;">NO →</span> END &nbsp;|&nbsp; <span style="color:red;">YES →</span> Loop back to Step 3</div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-arrow">↓ (NO)</div>', unsafe_allow_html=True)
-    st.markdown('<div class="flow-step" style="background:#d4edda;border-left-color:#28a745;">🔴 <b>END</b> — Process Complete. No more shortfall.</div>', unsafe_allow_html=True)
-
-# ════════════════════════════════════════════════════════════════
-# PDF GENERATOR
-# ════════════════════════════════════════════════════════════════
-def generate_pdf():
+# ─── Main PDF Generator ───────────────────────────────────────────────────────
+def generate_pdf(steps, meta):
     buf = io.BytesIO()
-    W, H = A4
-    c = rl_canvas.Canvas(buf, pagesize=A4)
-    ml=18; pw=W-36
+    PW, PH = landscape(A4)
+    c  = canvas.Canvas(buf, pagesize=(PW, PH))
 
-    def draw_diamond(cx, cy, hw, hh):
-        p = c.beginPath()
-        p.moveTo(cx,cy+hh); p.lineTo(cx+hw,cy); p.lineTo(cx,cy-hh); p.lineTo(cx-hw,cy); p.close()
-        c.drawPath(p, stroke=1, fill=0)
+    ML = 14 * mm; MR = 14 * mm; MT = 12 * mm
+    TW = PW - ML - MR
+    cur_y = PH - MT
 
-    def arrow_dn(x, y, ln=9):
-        c.line(x,y,x,y-ln)
-        c.line(x-3,y-ln+4,x,y-ln); c.line(x+3,y-ln+4,x,y-ln)
+    # Header
+    HEADER_H = 22 * mm
+    left_w   = 44 * mm; right_w = 83 * mm
+    centre_w = TW - left_w - right_w
+
+    c.setFont("Helvetica-Bold", 11); c.setFillColor(colors.black)
+    c.drawString(ML, cur_y - 7, meta["company_name"])
+    c.setFont("Helvetica-Bold", 10); c.setFillColor(colors.HexColor("#1a6dcc"))
+    c.drawString(ML, cur_y - 18, "eka"); c.setFillColor(colors.black)
+
+    cx_title = ML + left_w + centre_w / 2
+    c.setFont("Helvetica-Bold", 13)
+    c.drawCentredString(cx_title, cur_y - 7, "STANDARD OPERATING PROCEDURE")
+    c.setFont("Helvetica", 8.5)
+    draw_centered_text(c, meta["title"], cx_title, cur_y - 18, centre_w - 4, font_size=8.5)
+
+    RX = ML + left_w + centre_w
+    c1w, c2w, c3w = 18*mm, 24*mm, 12*mm
+    c4w = right_w - c1w - c2w - c3w
+    rh  = HEADER_H / 4
+    meta_rows = [
+        ("SOP No.",  meta["sop_no"],   "Page",    meta["page_info"]),
+        ("Rev No.",  meta["rev_no"],   "Date",    meta["date"]),
+        ("Unit",     meta["unit"],     "Area",    meta["area"]),
+        ("Sub Area", meta["sub_area"], "Zone",    meta["zone"]),
+    ]
+    for ri, (l1, v1, l2, v2) in enumerate(meta_rows):
+        ry  = cur_y - (ri + 1) * rh
+        rxs = [RX, RX+c1w, RX+c1w+c2w, RX+c1w+c2w+c3w, RX+right_w]
+        for ci, (txt, is_lbl) in enumerate([(l1,True),(v1,False),(l2,True),(v2,False)]):
+            cw = rxs[ci+1] - rxs[ci]
+            c.setFillColor(colors.HexColor("#EEF3FF") if is_lbl else colors.white)
+            c.setStrokeColor(colors.black); c.setLineWidth(0.5)
+            c.rect(rxs[ci], ry, cw, rh, fill=1, stroke=1)
+            c.setFillColor(colors.black)
+            fn = "Helvetica-Bold" if is_lbl else "Helvetica"
+            fs = 5.8 if is_lbl else 6.2
+            draw_left_text(c, txt, rxs[ci]+1.5, ry+rh/2, cw-3, fn, fs)
 
     c.setLineWidth(1)
-    # Header
-    hh=42; ht=H-18
-    c.rect(ml,ht-hh,pw,hh)
-    lw=pw*0.28; c.rect(ml,ht-hh,lw,hh)
-    c.setFont("Helvetica-Bold",8); c.drawString(ml+4,ht-12,company)
-    c.setFillColorRGB(0,0.55,0.55); c.setFont("Helvetica-Bold",13)
-    c.drawString(ml+4,ht-29,f"€ {brand}"); c.setFillColorRGB(0,0,0)
-    tw2=pw*0.44; tx=ml+lw; c.rect(tx,ht-hh,tw2,hh)
-    c.setFont("Helvetica-Bold",12)
-    t="STANDARD OPERATING PROCEDURE"
-    c.drawString(tx+(tw2-c.stringWidth(t,"Helvetica-Bold",12))/2,ht-14,t)
-    c.setFont("Helvetica",7.5)
-    s="Direct Supply of Parts from Stores to Assy Line"
-    c.drawString(tx+(tw2-c.stringWidth(s,"Helvetica",7.5))/2,ht-26,s)
-    ix=tx+tw2; iw=pw-lw-tw2; rh=hh/4
-    lbs=[("SOP No.",sop_no),("Rev No.",rev_no),("Unit",unit),("Sub Area",sub_area)]
-    rvs=[("Page",page_info),("Date",sop_date.strftime("%d-%m-%Y")),("Area",area),("Zone",zone)]
-    for i,((l1,v1),(l2,v2)) in enumerate(zip(lbs,rvs)):
-        yr=ht-hh+(3-i)*rh
-        c.rect(ix,yr,iw/2,rh); c.rect(ix+iw/2,yr,iw/2,rh)
-        c.setFont("Helvetica-Bold",5); c.drawString(ix+2,yr+rh/2+1,l1)
-        c.setFont("Helvetica",5);      c.drawString(ix+2,yr+1,v1)
-        c.setFont("Helvetica-Bold",5); c.drawString(ix+iw/2+2,yr+rh/2+1,l2)
-        c.setFont("Helvetica",5);      c.drawString(ix+iw/2+2,yr+1,v2)
+    c.line(ML, cur_y - HEADER_H, ML + TW, cur_y - HEADER_H)
+    cur_y -= HEADER_H
 
-    # Purpose/Scope
-    pt=ht-hh; ph=22; c.rect(ml,pt-ph,pw,ph)
-    pw1=42; c.rect(ml,pt-ph,pw1,ph)
-    c.setFont("Helvetica-Bold",8); c.drawString(ml+3,pt-ph/2-3,"Purpose")
-    pv=pw*0.38; c.rect(ml+pw1,pt-ph,pv,ph)
-    c.setFont("Helvetica",7); c.drawString(ml+pw1+4,pt-ph/2-3,purpose[:65])
-    slx=ml+pw1+pv; slw=30; c.rect(slx,pt-ph,slw,ph)
-    c.setFont("Helvetica-Bold",8); c.drawString(slx+3,pt-ph/2-3,"Scope")
-    svx=slx+slw; svw=pw-pw1-pv-slw; c.rect(svx,pt-ph,svw,ph)
-    c.setFont("Helvetica",6)
-    sc1=scope[:58]; sc2=scope[58:116]
-    c.drawString(svx+3,pt-10,sc1)
-    if sc2: c.drawString(svx+3,pt-18,sc2)
-
-    # Process Steps header
-    pst=pt-ph; psth=14; c.rect(ml,pst-psth,pw,psth)
-    c.setFont("Helvetica-Bold",9); c.drawString(ml+4,pst-10,"Process Steps:")
-    ox=ml+pw*0.62; c.drawString(ox+10,pst-10,"OWNER :")
-    c.drawString(ox+55,pst-10,owner)
-
-    # Column headers
-    ct=pst-psth; chh=18
-    ciw=pw*0.12; cfw=pw*0.50; cow=pw*0.10; crw=pw*0.10; cdw=pw*0.09; cmw=pw-ciw-cfw-cow-crw-cdw
-    col_defs=[(ml,ciw,"Input"),(ml+ciw,cfw,"Process Flow"),(ml+ciw+cfw,cow,"Output"),
-              (ml+ciw+cfw+cow,crw,"Responsible"),(ml+ciw+cfw+cow+crw,cdw,"Doc. Format /\nSystem"),
-              (ml+ciw+cfw+cow+crw+cdw,cmw,"Effective\nMeasurement")]
-    for (cx,cw,lbl) in col_defs:
-        c.rect(cx,ct-chh,cw,chh); c.setFont("Helvetica-Bold",6.5)
-        lines=lbl.split('\n')
-        if len(lines)==1:
-            c.drawString(cx+(cw-c.stringWidth(lbl,"Helvetica-Bold",6.5))/2,ct-chh/2-3,lbl)
+    # Purpose / Scope
+    PS_H = 8 * mm
+    PL_W, PV_W, SL_W = 18*mm, 82*mm, 14*mm
+    SV_W = TW - PL_W - PV_W - SL_W
+    c.setLineWidth(0.6)
+    for x, w, txt, bold, centre in [
+        (ML,           PL_W, "Purpose", True,  False),
+        (ML+PL_W,      PV_W, meta["purpose"], False, False),
+        (ML+PL_W+PV_W, SL_W, "Scope",   True,  False),
+        (ML+PL_W+PV_W+SL_W, SV_W, meta["scope"], False, True),
+    ]:
+        c.setFillColor(colors.white)
+        c.rect(x, cur_y - PS_H, w, PS_H, fill=1, stroke=1)
+        c.setFillColor(colors.black)
+        if bold:
+            c.setFont("Helvetica-Bold", 8)
+            c.drawString(x + 2, cur_y - PS_H + 2.5, txt)
+        elif centre:
+            draw_centered_text(c, txt, x + w/2, cur_y - PS_H/2, w - 4, font_size=6.5)
         else:
-            c.drawString(cx+(cw-c.stringWidth(lines[0],"Helvetica-Bold",6.5))/2,ct-7,lines[0])
-            c.drawString(cx+(cw-c.stringWidth(lines[1],"Helvetica-Bold",6.5))/2,ct-14,lines[1])
+            draw_left_text(c, txt, x + 2, cur_y - PS_H/2, w - 4, font_size=7.5)
+    cur_y -= PS_H
 
-    # Body
-    bt=ct-chh; bh=300
-    for (cx,cw,_) in col_defs: c.rect(cx,bt-bh,cw,bh)
-    c.setFont("Helvetica",6)
-    c.drawString(ml+2,bt-80,"Direct Master Sheet")
-    c.drawString(ml+2,bt-110,"Production Plan")
-    c.drawString(ml+ciw+cfw+3,bt-105,"Coverage Shortfall")
-    rsx=ml+ciw+cfw+cow
-    for dy in [73,103,145,185,228]:
-        c.setFont("Helvetica",5.5); c.drawString(rsx+1,bt-dy,responsible)
-    c.setFont("Helvetica",6); c.drawString(rsx+crw+2,bt-103,"Hardcopy sheet")
-    c.drawString(rsx+crw+cdw+2,bt-55,"MTRL Coverage (N+1)")
-    c.drawString(rsx+crw+cdw+2,bt-64,f"(TARGET: {target_coverage}%)")
+    # Column layout
+    COL_IN   = 25 * mm; COL_OUT  = 22 * mm; COL_RESP = 28 * mm
+    COL_DOC  = 24 * mm; COL_MEAS = 26 * mm
+    COL_FLOW = TW - COL_IN - COL_OUT - COL_RESP - COL_DOC - COL_MEAS
+    FLOW_COL_IDX = 1
 
-    # Flowchart
-    fc_cx=ml+ciw+cfw/2; c.setLineWidth(0.7)
-    o1cy=bt-22; ohw=85; ohh=8
-    c.ellipse(fc_cx-ohw,o1cy-ohh,fc_cx+ohw,o1cy+ohh)
-    c.setFont("Helvetica",6)
-    t="Production lay sequence for N+1 day"
-    c.drawString(fc_cx-c.stringWidth(t,"Helvetica",6)/2,o1cy-3,t)
-    arrow_dn(fc_cx,o1cy-ohh)
+    XS = [
+        ML, ML + COL_IN, ML + COL_IN + COL_FLOW,
+        ML + COL_IN + COL_FLOW + COL_OUT,
+        ML + COL_IN + COL_FLOW + COL_OUT + COL_RESP,
+        ML + COL_IN + COL_FLOW + COL_OUT + COL_RESP + COL_DOC,
+        ML + TW,
+    ]
+    FLOW_L = XS[1]; FLOW_R = XS[2]
+    SH_W_L   = COL_FLOW * 0.44 - 2*mm
+    SH_W_R   = COL_FLOW * 0.44 - 2*mm
+    LEFT_CX  = FLOW_L + COL_FLOW * 0.25
+    RIGHT_CX = FLOW_L + COL_FLOW * 0.75
 
-    r1y=o1cy-ohh-9-12; r1w=140; r1h=12
-    c.rect(fc_cx-r1w/2,r1y,r1w,r1h); c.setFont("Helvetica",5.6)
-    t="Verify line side stock & Update Direct Coverage Sheet"
-    c.drawString(fc_cx-c.stringWidth(t,"Helvetica",5.6)/2,r1y+3,t)
-    arrow_dn(fc_cx,r1y)
+    HDR1_H = 7 * mm
+    c.setFillColor(colors.HexColor("#DDEEFF"))
+    c.rect(ML, cur_y - HDR1_H, TW, HDR1_H, fill=1, stroke=1)
+    c.setFont("Helvetica-Bold", 9); c.setFillColor(colors.black)
+    c.drawString(ML + 3, cur_y - HDR1_H + 2.5, "Process Steps:")
+    c.drawString(XS[3] + 3, cur_y - HDR1_H + 2.5, f"OWNER :   {meta['owner']}")
+    cur_y -= HDR1_H
 
-    r2y=r1y-9-12; r2w=140; r2h=12
-    c.rect(fc_cx-r2w/2,r2y,r2w,r2h); c.setFont("Helvetica",5.6)
-    t="Check material coverage w.r.t. N (today) day plan"
-    c.drawString(fc_cx-c.stringWidth(t,"Helvetica",5.6)/2,r2y+3,t)
-    arrow_dn(fc_cx,r2y)
+    HDR2_H = 7 * mm
+    col_labels = ["Input", "Process Flow", "Output", "Responsible",
+                  "Doc. Format /\nSystem", "Effective\nMeasurement"]
+    for i, label in enumerate(col_labels):
+        cw = XS[i+1] - XS[i]
+        c.setFillColor(colors.HexColor("#EEF3FF"))
+        c.rect(XS[i], cur_y - HDR2_H, cw, HDR2_H, fill=1, stroke=1)
+        c.setFillColor(colors.black)
+        lines = label.split("\n")
+        lh = 6.5; sy = cur_y - HDR2_H/2 + (len(lines)-1)*lh/2
+        for li, ln in enumerate(lines):
+            c.setFont("Helvetica-Bold", 6.5)
+            c.drawCentredString(XS[i]+cw/2, sy - li*(lh+0.5), ln)
+    cur_y -= HDR2_H
 
-    d1cy=r2y-9-16; d1hw=48; d1hh=16
-    draw_diamond(fc_cx,d1cy,d1hw,d1hh)
-    c.setFont("Helvetica",5.5)
-    c.drawString(fc_cx-c.stringWidth("Is Part available for","Helvetica",5.5)/2,d1cy+3,"Is Part available for")
-    c.drawString(fc_cx-c.stringWidth("N day ?","Helvetica",5.5)/2,d1cy-4,"N day ?")
+    SHAPE_H = {
+        "rect": 9*mm, "oval": 9*mm, "parallelogram": 9*mm,
+        "diamond": 15*mm, "arrow_text": 6*mm,
+    }
+    V_PAD = 5 * mm; table_top = cur_y
 
-    ybx=fc_cx+d1hw+5; ybw=105; ybh=20
-    c.line(fc_cx+d1hw,d1cy,ybx,d1cy)
-    c.setFont("Helvetica",5); c.drawString(fc_cx+d1hw+1,d1cy+1,"YES")
-    c.rect(ybx,d1cy-ybh/2,ybw,ybh); c.setFont("Helvetica",5.5)
-    c.drawString(ybx+3,d1cy+3,"Check material coverage w.r.t. N+1")
-    c.drawString(ybx+3,d1cy-4,"(tomorrow) day plan")
-
-    d2cx=ybx+ybw+32; d2cy=d1cy; d2hw=20; d2hh=12
-    c.line(ybx+ybw,d1cy,d2cx-d2hw,d1cy)
-    draw_diamond(d2cx,d2cy,d2hw,d2hh)
-    c.setFont("Helvetica",4.8)
-    c.drawString(d2cx-c.stringWidth("Is Part available","Helvetica",4.8)/2,d2cy+3,"Is Part available")
-    c.drawString(d2cx-c.stringWidth("for N+1 day ?","Helvetica",4.8)/2,d2cy-3,"for N+1 day ?")
-
-    r4y=d1cy-d1hh-6-12; r4w=140; r4h=12
-    c.line(d2cx-d2hw,d2cy,fc_cx+r4w/2+8,d2cy)
-    c.line(fc_cx+r4w/2+8,d2cy,fc_cx+r4w/2+8,r4y+r4h/2)
-    c.line(fc_cx+r4w/2+8,r4y+r4h/2,fc_cx+r4w/2,r4y+r4h/2)
-    c.setFont("Helvetica",5); c.drawString(d2cx-d2hw-6,d2cy+1,"No")
-    arrow_dn(fc_cx,d1cy-d1hh)
-    c.setFont("Helvetica",5); c.drawString(fc_cx+2,d1cy-d1hh-4,"No")
-
-    c.rect(fc_cx-r4w/2,r4y,r4w,r4h); c.setFont("Helvetica",5.6)
-    t="Check the part availability in Loaded Trolley Area"
-    c.drawString(fc_cx-c.stringWidth(t,"Helvetica",5.6)/2,r4y+3,t)
-    arrow_dn(fc_cx,r4y)
-
-    d3cy=r4y-6-14; d3hw=46; d3hh=14
-    draw_diamond(fc_cx,d3cy,d3hw,d3hh)
-    c.setFont("Helvetica",5.5)
-    c.drawString(fc_cx-c.stringWidth("Is available in","Helvetica",5.5)/2,d3cy+4,"Is available in")
-    c.drawString(fc_cx-c.stringWidth("Loaded Trolley","Helvetica",5.5)/2,d3cy-2,"Loaded Trolley")
-    c.drawString(fc_cx-c.stringWidth("Area ?","Helvetica",5.5)/2,d3cy-8,"Area ?")
-
-    bbx=fc_cx+d3hw+10; bbw=82; bbh=22
-    c.line(fc_cx+d3hw,d3cy,bbx,d3cy)
-    c.setFont("Helvetica",5); c.drawString(fc_cx+d3hw+1,d3cy+1,"No")
-    c.rect(bbx,d3cy-bbh/2,bbw,bbh); c.setFont("Helvetica",5.5)
-    c.drawString(bbx+3,d3cy-bbh/2+14,"B. Inform Responsible person &")
-    c.drawString(bbx+3,d3cy-bbh/2+7,"seek for readiness confirmation")
-
-    arrow_dn(fc_cx,d3cy-d3hh)
-    c.setFont("Helvetica",5); c.drawString(fc_cx+2,d3cy-d3hh-4,"yes")
-    ay=d3cy-d3hh-6-22; aw=100; ah=22; ax=fc_cx-aw-2
-    c.rect(ax,ay,aw,ah); c.setFont("Helvetica",5.3)
-    c.drawString(ax+3,ay+14,"A. Move Loaded Trolley to Direct Part")
-    c.drawString(ax+3,ay+7,"Location & Update Bincard & Coverage sheet")
-    c.line(ax+aw,ay+ah/2,bbx,d3cy-bbh/2+bbh/2)
-
-    lx=ax-8
-    c.line(fc_cx-d3hw,d3cy,lx,d3cy); c.line(lx,d3cy,lx,ay+ah)
-    c.line(lx,ay+ah,ax,ay+ah/2)
-    c.line(lx,ay,lx,ay-8)
-    c.setFont("Helvetica",5.5); c.drawString(lx-22,ay-4,"YES")
-
-    dfc_cx=fc_cx-10; dfc_cy=ay-8-14; dfc_hw=55; dfc_hh=14
-    c.line(lx,ay,lx,dfc_cy); c.line(lx,dfc_cy,dfc_cx-dfc_hw,dfc_cy)
-    draw_diamond(dfc_cx,dfc_cy,dfc_hw,dfc_hh)
-    c.setFont("Helvetica",5.5)
-    t="Any more shortfall as per?"
-    c.drawString(dfc_cx-c.stringWidth(t,"Helvetica",5.5)/2,dfc_cy+3,t)
-
-    fnoy=dfc_cy-dfc_hh; c.line(dfc_cx,fnoy,dfc_cx,fnoy-8)
-    c.setFont("Helvetica",5); c.drawString(dfc_cx+1,fnoy-5,"No")
-    ecy=fnoy-8-8
-    c.setFillColorRGB(0.1,0.1,0.1)
-    c.ellipse(dfc_cx-28,ecy-7,dfc_cx+28,ecy+7,stroke=1,fill=1)
-    c.setFillColorRGB(0,0,0)
-
-    # Change Record
-    crt=bt-bh-4; crth=12
-    c.rect(ml,crt-crth,pw,crth); c.setFont("Helvetica-Bold",8)
-    t="SOP Change Record"
-    c.drawString(ml+(pw-c.stringWidth(t,"Helvetica-Bold",8))/2,crt-9,t)
-    chg_cols=[(30,"S.No."),(50,"EFFECTIVE DATE"),(38,"REV. No."),(130,"CHANGE DESCRIPTION"),
-              (100,"CHANGE LETTER\n(P/D/S)"),(65,"PREPARED BY"),(65,"REVIEWED BY"),
-              (pw-30-50-38-130-100-65-65,"APPROVED BY")]
-    rch=12; cx2=ml
-    for (cw,lbl) in chg_cols:
-        c.rect(cx2,crt-crth-rch,cw,rch); c.setFont("Helvetica-Bold",5)
-        lines=lbl.split('\n')
-        if len(lines)==1:
-            c.drawString(cx2+(cw-c.stringWidth(lbl,"Helvetica-Bold",5))/2,crt-crth-rch/2-2,lbl)
+    # Pair rows
+    paired_rows = []; step_to_pair = {}
+    for idx, step in enumerate(steps):
+        col = step.get("column", "left")
+        if col == "right":
+            paired = False
+            for pi in range(len(paired_rows) - 1, -1, -1):
+                if paired_rows[pi]["right"] is None:
+                    paired_rows[pi]["right"] = idx
+                    step_to_pair[idx] = pi; paired = True; break
+            if not paired:
+                paired_rows.append({"left": None, "right": idx})
+                step_to_pair[idx] = len(paired_rows) - 1
         else:
-            c.drawString(cx2+(cw-c.stringWidth(lines[0],"Helvetica-Bold",5))/2,crt-crth-6,lines[0])
-            c.drawString(cx2+(cw-c.stringWidth(lines[1],"Helvetica-Bold",5))/2,crt-crth-11,lines[1])
-        cx2+=cw
+            paired_rows.append({"left": idx, "right": None})
+            step_to_pair[idx] = len(paired_rows) - 1
 
-    for r_i, ch_rec in enumerate(st.session_state.changes):
-        row_data=[str(r_i+1),ch_rec["eff_date"].strftime("%d-%m-%Y"),ch_rec["rev"],
-                  ch_rec["desc"][:40],ch_rec.get("change_letter","NA"),
-                  ch_rec["prepared"],ch_rec["reviewed"],ch_rec["approved"]]
-        cx2=ml; ry=crt-crth-rch*(r_i+2)
-        for j,(cw,_) in enumerate(chg_cols):
-            c.rect(cx2,ry,cw,rch); c.setFont("Helvetica",5.5)
-            tw=c.stringWidth(row_data[j],"Helvetica",5.5)
-            c.drawString(cx2+(cw-tw)/2,ry+3,row_data[j]); cx2+=cw
+    row_geom = []; scan_y = cur_y
+    for pair in paired_rows:
+        h_left  = SHAPE_H.get(steps[pair["left"]]["shape"],  9*mm) if pair["left"]  is not None else 0
+        h_right = SHAPE_H.get(steps[pair["right"]]["shape"], 9*mm) if pair["right"] is not None else 0
+        ROW_H = max(h_left, h_right) + 2 * V_PAD
+        ry = scan_y - ROW_H
+        row_geom.append({"ry": ry, "ROW_H": ROW_H}); scan_y = ry
+    table_bottom = scan_y
 
-    for r_i in range(len(st.session_state.changes), len(st.session_state.changes)+2):
-        cx2=ml; ry=crt-crth-rch*(r_i+2)
-        for (cw,_) in chg_cols: c.rect(cx2,ry,cw,rch); cx2+=cw
+    row_bottoms = [rg["ry"] for rg in row_geom]
+    draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_bottoms)
 
-    fy=crt-crth-rch*(len(st.session_state.changes)+4)-6
-    c.setFont("Helvetica",6)
-    ft="Composed By: Agilomatrix Pvt Ltd (connectus@agilomatrix.com)"
-    c.drawString(ml+(pw-c.stringWidth(ft,"Helvetica",6))/2,fy,ft)
+    for pi, pair in enumerate(paired_rows):
+        rg = row_geom[pi]; ry, ROW_H = rg["ry"], rg["ROW_H"]
+        ref_idx = pair["left"] if pair["left"] is not None else pair["right"]
+        step = steps[ref_idx]
+        for col_i, key in [(0,"input_label"),(2,"output_label"),(3,"responsible"),(4,"doc_format"),(5,"measurement")]:
+            txt = step.get(key,"")
+            if txt:
+                cw = XS[col_i+1] - XS[col_i]
+                draw_centered_text(c, txt, XS[col_i]+cw/2, ry+ROW_H/2, cw-4, font_size=6.5)
 
+    anchors = {}
+    for idx, step in enumerate(steps):
+        pi = step_to_pair[idx]; rg = row_geom[pi]
+        ry, ROW_H = rg["ry"], rg["ROW_H"]
+        col = step.get("column", "left"); sh_h = SHAPE_H.get(step["shape"], 9*mm)
+        if col == "right":
+            cx = RIGHT_CX; sh_w = SH_W_R
+        else:
+            cx = LEFT_CX; sh_w = SH_W_L
+        sh_x = cx - sh_w / 2; sh_bot = ry + V_PAD; sh_top = sh_bot + sh_h; sh_mid = sh_bot + sh_h / 2
+        anchors[idx] = {"cx": cx, "cy": sh_mid, "top": sh_top, "bot": sh_bot,
+                        "left": sh_x, "right": sh_x + sh_w,
+                        "sh_x": sh_x, "sh_w": sh_w, "sh_h": sh_h, "sh_bot": sh_bot, "col": col}
+
+    GREEN = colors.HexColor("#006600"); RED = colors.HexColor("#CC0000"); BLUE = colors.HexColor("#1a6dcc")
+
+    for idx, step in enumerate(steps):
+        a = anchors[idx]; col = a["col"]
+        connect_from = step.get("connect_from", "")
+        arrow_label  = step.get("arrow_label", "").strip()
+        connect_side = step.get("connect_side", "bottom (default)")
+        lbl_lower    = arrow_label.upper()
+        arr_color = GREEN if lbl_lower == "YES" else (RED if lbl_lower == "NO" else colors.black)
+        lbl_color = arr_color
+
+        if connect_from != "" and str(connect_from).isdigit():
+            src_idx = int(connect_from)
+            if 0 <= src_idx < len(anchors):
+                s = anchors[src_idx]
+                if connect_side == "right side →":
+                    sx, sy = s["right"], s["cy"]
+                    draw_elbow_arrow(c, sx, sy, a["cx"], a["top"], color=arr_color, label=arrow_label, label_color=lbl_color)
+                elif connect_side == "left side ←":
+                    sx, sy = s["left"], s["cy"]
+                    draw_elbow_arrow(c, sx, sy, a["cx"], a["top"], color=arr_color, label=arrow_label, label_color=lbl_color)
+                else:
+                    sx, sy = s["cx"], s["bot"]
+                    if abs(sx - a["cx"]) < 2:
+                        draw_arrow_down(c, a["cx"], sy, a["top"], color=arr_color)
+                        if arrow_label:
+                            c.setFont("Helvetica-Bold", 6); c.setFillColor(lbl_color)
+                            c.drawCentredString(a["cx"] + 6, (sy + a["top"])/2, arrow_label)
+                            c.setFillColor(colors.black)
+                    else:
+                        draw_elbow_arrow(c, sx, sy, a["cx"], a["top"], color=arr_color, label=arrow_label, label_color=lbl_color)
+        else:
+            if idx > 0:
+                prev_same = None
+                for pi in range(idx - 1, -1, -1):
+                    if anchors[pi]["col"] == col: prev_same = pi; break
+                if prev_same is not None:
+                    ps = anchors[prev_same]
+                    draw_arrow_down(c, a["cx"], ps["bot"], a["top"])
+
+        loop_to = step.get("loop_to", ""); loop_label = step.get("loop_label", "").strip()
+        if loop_to != "" and str(loop_to).isdigit():
+            lt_idx = int(loop_to)
+            if 0 <= lt_idx < len(anchors):
+                dest = anchors[lt_idx]
+                ll_color = GREEN if loop_label.upper() == "YES" else (RED if loop_label.upper() == "NO" else BLUE)
+                margin = FLOW_L - 5 * mm
+                c.setStrokeColor(ll_color); c.setLineWidth(0.8)
+                start_x = a["sh_x"]; start_y = a["cy"]
+                dest_x  = dest["left"]; dest_y  = dest["cy"]
+                c.line(start_x, start_y, margin, start_y)
+                c.line(margin, start_y, margin, dest_y)
+                size = 3.5
+                c.line(margin, dest_y, dest_x - size*1.5, dest_y)
+                arrowhead(c, dest_x, dest_y, "right")
+                if loop_label:
+                    c.setFont("Helvetica-Bold", 6); c.setFillColor(ll_color)
+                    c.drawString(margin + 2, (start_y + dest_y)/2 + 2, loop_label)
+                    c.setFillColor(colors.black)
+                c.setStrokeColor(colors.black)
+
+    for idx, step in enumerate(steps):
+        a = anchors[idx]; sh_x, sh_bot = a["sh_x"], a["sh_bot"]
+        sh_w, sh_h = a["sh_w"], a["sh_h"]; shape = step["shape"]
+        if shape == "rect":
+            draw_rect_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
+        elif shape == "oval":
+            draw_oval_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
+        elif shape == "diamond":
+            draw_diamond_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
+            yes_lbl = step.get("yes_label", "YES") or "YES"; no_lbl = step.get("no_label", "NO") or "NO"
+            c.setFont("Helvetica-Bold", 6.5); c.setFillColor(GREEN)
+            c.drawString(sh_x + sh_w + 3, a["cy"] - 3, f"{yes_lbl} →")
+            no_w = c.stringWidth(f"← {no_lbl}", "Helvetica-Bold", 6.5)
+            c.setFillColor(RED); c.drawString(sh_x - no_w - 3, a["cy"] - 3, f"← {no_lbl}")
+            c.setFillColor(colors.black)
+        elif shape == "parallelogram":
+            draw_parallelogram_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
+        elif shape == "arrow_text":
+            c.setFont("Helvetica-Oblique", 7); c.setFillColor(colors.HexColor("#333333"))
+            c.drawCentredString(a["cx"], a["cy"], step["text"]); c.setFillColor(colors.black)
+
+    cur_y = table_bottom
+
+    # Change record
+    cur_y -= 4 * mm
+    CR_TITLE_H = 6 * mm
+    c.setFillColor(colors.HexColor("#DDEEFF"))
+    c.rect(ML, cur_y - CR_TITLE_H, TW, CR_TITLE_H, fill=1, stroke=1)
+    c.setFont("Helvetica-Bold", 8); c.setFillColor(colors.black)
+    c.drawCentredString(ML + TW/2, cur_y - CR_TITLE_H + 2, "SOP Change Record")
+    cur_y -= CR_TITLE_H
+
+    CR_COLS   = ["S.No.", "Effective\nDate", "REV.\nNo.", "Change Description",
+                 "Change Letter\n(Process:P / Doc:D / System:S)",
+                 "Prepared By", "Reviewed By", "Approved By"]
+    CR_WIDTHS = [10*mm, 20*mm, 14*mm, 52*mm, 46*mm, 22*mm, 22*mm, 0]
+    CR_WIDTHS[-1] = TW - sum(CR_WIDTHS[:-1])
+    CR_XS = [ML]
+    for w in CR_WIDTHS: CR_XS.append(CR_XS[-1] + w)
+
+    CR_HDR_H = 8 * mm
+    for i, label in enumerate(CR_COLS):
+        cw = CR_XS[i+1] - CR_XS[i]
+        c.setFillColor(colors.HexColor("#EEF3FF"))
+        c.rect(CR_XS[i], cur_y - CR_HDR_H, cw, CR_HDR_H, fill=1, stroke=1)
+        c.setFillColor(colors.black)
+        lines = label.split("\n"); lh = 6; sy = cur_y - CR_HDR_H/2 + (len(lines)-1)*lh/2
+        for li, ln in enumerate(lines):
+            c.setFont("Helvetica-Bold", 5.5)
+            c.drawCentredString(CR_XS[i]+cw/2, sy - li*(lh+0.5), ln)
+    cur_y -= CR_HDR_H
+
+    CR_ROW_H = 6 * mm
+    for row in meta.get("change_records", []):
+        vals = [row.get("sno",""), row.get("date",""), row.get("rev",""),
+                row.get("desc",""), row.get("change_letter",""),
+                row.get("prepared",""), row.get("reviewed",""), row.get("approved","")]
+        for i, val in enumerate(vals):
+            cw = CR_XS[i+1] - CR_XS[i]
+            c.setFillColor(colors.white)
+            c.rect(CR_XS[i], cur_y - CR_ROW_H, cw, CR_ROW_H, fill=1, stroke=1)
+            draw_centered_text(c, val, CR_XS[i]+cw/2, cur_y-CR_ROW_H/2, cw-3, font_size=6)
+        cur_y -= CR_ROW_H
+
+    c.setFont("Helvetica-Oblique", 6); c.setFillColor(colors.HexColor("#555555"))
+    c.drawCentredString(ML + TW/2, cur_y - 5, f"Composed By: {meta['composed_by']}")
     c.save(); buf.seek(0)
     return buf
 
-# ════════════════════════════════════════════════════════════════
-# EXCEL GENERATOR
-# ════════════════════════════════════════════════════════════════
-def generate_excel():
-    wb = openpyxl.Workbook()
-    thin = Border(left=Side(style='thin'),right=Side(style='thin'),top=Side(style='thin'),bottom=Side(style='thin'))
 
-    def hcell(ws, row, col, val, bg="003366", fg="FFFFFF", bold=True, size=10, merge_end=None):
-        cell = ws.cell(row=row, column=col, value=val)
-        cell.fill = PatternFill("solid", fgColor=bg)
-        cell.font = Font(color=fg, bold=bold, size=size)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = thin
-        if merge_end:
-            ws.merge_cells(start_row=row, start_column=col, end_row=row, end_column=merge_end)
-        return cell
+# ─── Streamlit UI ─────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+    .block-container { padding-top: 1rem; }
+    h1 { font-size: 1.35rem; margin-bottom: 0.2rem; }
+    h2 { font-size: 1.05rem; }
+    .stButton > button { width: 100%; }
+    .preview-label {
+        font-size: 0.75rem; font-weight: 600; color: #4A5568;
+        text-transform: uppercase; letter-spacing: 0.05em;
+        margin-bottom: 4px;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-    def dcell(ws, row, col, val, bg=None, fc="000000", bold=False):
-        cell = ws.cell(row=row, column=col, value=val)
-        if bg: cell.fill = PatternFill("solid", fgColor=bg)
-        cell.font = Font(color=fc, bold=bold, size=9)
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = thin
-        return cell
+st.title("📋 SOP Builder — Standard Operating Procedure")
+st.caption("Fill in the details, build your process flow, then download as PDF.")
 
-    # ── Sheet 1: SOP Summary ─────────────────────────────────
-    ws = wb.active; ws.title = "SOP Summary"
-    hcell(ws,1,1,"STANDARD OPERATING PROCEDURE — Direct Supply of Parts from Stores to Assy Line",merge_end=4,size=13)
-    ws.row_dimensions[1].height = 30; ws.column_dimensions["A"].width=22; ws.column_dimensions["B"].width=35
-    ws.column_dimensions["C"].width=22; ws.column_dimensions["D"].width=22
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["🏷️ Header Info", "🔷 Process Flow", "📝 Change Record", "📄 Download PDF"])
 
-    fields=[("Company",company),("Brand",brand),("SOP No.",sop_no),("Rev No.",rev_no),
-            ("Date",sop_date.strftime("%d-%m-%Y")),("Unit",unit),("Area",area),
-            ("Sub Area",sub_area),("Zone",zone),("Page",page_info),
-            ("Purpose",purpose),("Scope",scope),("Owner",owner),
-            ("Responsible",responsible),("MTRL Target",f"{target_coverage}%")]
-    for i,(k,v) in enumerate(fields,2):
-        c1=ws.cell(row=i,column=1,value=k); c1.font=Font(bold=True,size=9,color="003366")
-        c1.fill=PatternFill("solid",fgColor="CCE0FF"); c1.border=thin
-        c1.alignment=Alignment(vertical="center")
-        ws.merge_cells(start_row=i,start_column=2,end_row=i,end_column=4)
-        c2=ws.cell(row=i,column=2,value=v); c2.border=thin
-        c2.alignment=Alignment(vertical="center",wrap_text=True); ws.row_dimensions[i].height=16
+# ── TAB 1 ─────────────────────────────────────────────────────────────────────
+with tab1:
+    st.subheader("Document Header Fields")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.session_state.company_name = st.text_input("Company Name",  st.session_state.company_name)
+        st.session_state.title        = st.text_input("SOP Sub-title", st.session_state.title)
+        st.session_state.sop_no       = st.text_input("SOP No.",       st.session_state.sop_no)
+        st.session_state.rev_no       = st.text_input("Rev. No.",      st.session_state.rev_no)
+    with c2:
+        st.session_state.date         = st.text_input("Date",          st.session_state.date)
+        st.session_state.page_info    = st.text_input("Page Info",     st.session_state.page_info)
+        st.session_state.unit         = st.text_input("Unit",          st.session_state.unit)
+        st.session_state.area         = st.text_input("Area",          st.session_state.area)
+    with c3:
+        st.session_state.sub_area     = st.text_input("Sub Area",      st.session_state.sub_area)
+        st.session_state.zone         = st.text_input("Zone",          st.session_state.zone)
+        st.session_state.owner        = st.text_input("Owner",         st.session_state.owner)
+        st.session_state.composed_by  = st.text_input("Composed By",   st.session_state.composed_by)
+    st.divider()
+    st.subheader("Purpose & Scope")
+    st.session_state.purpose = st.text_input("Purpose", st.session_state.purpose)
+    st.session_state.scope   = st.text_area("Scope",    st.session_state.scope, height=80)
 
-    # ── Sheet 2: Parts Coverage ──────────────────────────────
-    ws2=wb.create_sheet("Parts Coverage")
-    hcell(ws2,1,1,"Parts Coverage Report — Line Supply SOP",merge_end=9,size=12)
-    ws2.row_dimensions[1].height=24
-    hdrs=["#","Part No.","Part Name","Supplier","Available N Day","Available N+1 Day","In Loaded Trolley","Shortfall Qty","Direct Part Location"]
-    for j,h in enumerate(hdrs,1): hcell(ws2,2,j,h,bg="0055AA",size=9)
-    ws2.row_dimensions[2].height=16
+# ── TAB 2 ─────────────────────────────────────────────────────────────────────
+with tab2:
 
-    for i,pt in enumerate(st.session_state.parts,1):
-        n_ok=pt.get("n_available","Yes"); n1_ok=pt.get("n1_available","Yes"); tr_ok=pt.get("trolley_available","Yes")
-        row=[i,pt.get("part_no",""),pt.get("part_name",""),pt.get("supplier",""),n_ok,n1_ok,tr_ok,pt.get("shortfall",""),pt.get("location","")]
-        bg_alt="F0F6FF" if i%2==0 else "FFFFFF"
-        for j,v in enumerate(row,1):
-            if j in [5,6,7]:
-                bg="D4EDDA" if v=="Yes" else "F8D7DA"; fc="155724" if v=="Yes" else "721C24"
-                dcell(ws2,i+2,j,v,bg=bg,fc=fc,bold=True)
-            else:
-                dcell(ws2,i+2,j,v,bg=bg_alt)
-        ws2.row_dimensions[i+2].height=15
+    # ── Split layout: left = form, right = preview ──────────────────────────
+    form_col, preview_col = st.columns([1, 1], gap="large")
 
-    for j,w in enumerate([5,14,22,18,15,15,15,13,24],1): ws2.column_dimensions[get_column_letter(j)].width=w
+    with form_col:
+        with st.expander("📖 How to build branching flows — read this first", expanded=False):
+            st.markdown("""
+**Two columns are available:** `left` (main flow) and `right` (branch).
 
-    # ── Sheet 3: Process Flow ─────────────────────────────────
-    ws3=wb.create_sheet("Process Flow")
-    hcell(ws3,1,1,"Process Flow — Direct Supply SOP",merge_end=4,size=12)
-    ws3.row_dimensions[1].height=24
-    for j,h in enumerate(["Step","Type","Description","Responsible"],1): hcell(ws3,2,j,h,bg="0055AA",size=9)
-    flow_steps=[
-        ("START","Trigger","Production lay sequence for N+1 day","-"),
-        ("Step 1","Process","Verify line side stock & Update Direct Coverage Sheet",responsible),
-        ("Step 2","Process","Check material coverage w.r.t. N (today) day plan",responsible),
-        ("Decision 1","Decision","Is Part available for N day? YES→Check N+1 | NO→Check Trolley",responsible),
-        ("Step 3A","Process","Check material coverage w.r.t. N+1 (tomorrow) day plan",responsible),
-        ("Decision 2","Decision","Is Part available for N+1? YES→Continue | NO→Check Trolley",responsible),
-        ("Step 4","Process","Check the part availability in Loaded Trolley Area",responsible),
-        ("Decision 3","Decision","Is available in Loaded Trolley Area? YES→Path A | NO→Path B",responsible),
-        ("Path A","Process","Move Loaded Trolley to Direct Part Location & Update Bincard & Direct coverage sheet",responsible),
-        ("Path B","Process","Inform Responsible person & seek for readiness confirmation",responsible),
-        ("Decision 4","Decision","Any more shortfall? YES→Loop back | NO→END",responsible),
-        ("END","End","Process Complete — No more shortfall","-"),
-    ]
-    type_colors={"Trigger":"E8F4FD","Process":"F0F6FF","Decision":"FDF5FF","End":"D4EDDA"}
-    for i,(step,typ,desc,resp) in enumerate(flow_steps,3):
-        bg=type_colors.get(typ,"FFFFFF")
-        dcell(ws3,i,1,step,bg=bg,bold=True); dcell(ws3,i,2,typ,bg=bg)
-        dcell(ws3,i,3,desc,bg=bg); dcell(ws3,i,4,resp,bg=bg)
-        ws3.row_dimensions[i].height=22
-    for j,w in enumerate([14,12,55,18],1): ws3.column_dimensions[get_column_letter(j)].width=w
+| Field | What it does |
+|---|---|
+| **Column** | Which column this shape lives in |
+| **Connect from step #** | Arrow comes from that step (1-based). Blank = auto |
+| **Arrow exits from** | Which side of source shape the arrow leaves |
+| **Arrow label** | Text on arrow (e.g. `YES`, `NO`) |
+| **Loop-back to step #** | Draws loop arrow back to an earlier step |
 
-    # ── Sheet 4: Change Record ────────────────────────────────
-    ws4=wb.create_sheet("Change Record")
-    hcell(ws4,1,1,"SOP Change Record",merge_end=8,size=12)
-    ws4.row_dimensions[1].height=22
-    ch_hdrs=["S.No.","Effective Date","Rev. No.","Change Description","Change Letter","Prepared By","Reviewed By","Approved By"]
-    for j,h in enumerate(ch_hdrs,1): hcell(ws4,2,j,h,bg="0055AA",size=9)
-    for i,ch in enumerate(st.session_state.changes,1):
-        row=[i,ch["eff_date"].strftime("%d-%m-%Y"),ch["rev"],ch["desc"],ch.get("change_letter","NA"),ch["prepared"],ch["reviewed"],ch["approved"]]
-        for j,v in enumerate(row,1): dcell(ws4,i+2,j,v,bg="F5F8FC" if i%2==0 else "FFFFFF")
-        ws4.row_dimensions[i+2].height=15
-    for j,w in enumerate([6,15,10,38,15,15,15,15],1): ws4.column_dimensions[get_column_letter(j)].width=w
+**Quick recipe:**
+```
+Step 1  left   oval      "Start"
+Step 2  left   rect      "Step A"
+Step 3  left   diamond   "Decision?"
+Step 4  right  rect      "Branch" — from:3, exits: right side →, label: YES
+Step 5  left   rect      "Continue" — from:3, label: NO
+```
+            """)
 
-    out=io.BytesIO(); wb.save(out); out.seek(0)
-    return out
+        st.subheader("Add a Process Step")
+        n_steps = len(st.session_state.steps)
 
-# ════════════════════════════════════════════════════════════════
-# DOWNLOAD BUTTONS
-# ════════════════════════════════════════════════════════════════
-st.markdown("---")
-st.subheader("📥 Generate & Download Reports")
-g1,g2,g3=st.columns(3)
+        with st.form("add_step_form", clear_on_submit=True):
+            fa, fb = st.columns([2, 3])
+            with fa:
+                shape_label = st.selectbox("Shape Type", list(SHAPE_TYPES.keys()))
+                col_choice  = st.selectbox("Column (left = main flow)", COLUMN_OPTIONS)
+            with fb:
+                step_text   = st.text_input("Text inside shape *")
 
-with g1:
-    if st.button("🖨️ Generate PDF", use_container_width=True):
-        with st.spinner("Building PDF..."):
-            pdf_buf=generate_pdf()
-        st.success("✅ PDF Ready!")
-        st.download_button("⬇️ Download PDF",data=pdf_buf,
-            file_name=f"Line_Supply_SOP_{sop_date.strftime('%d%m%Y')}.pdf",
-            mime="application/pdf",use_container_width=True)
+            st.markdown("**Side-column data (optional)**")
+            sc1, sc2, sc3 = st.columns(3)
+            with sc1:
+                input_label  = st.text_input("Input Label")
+                output_label = st.text_input("Output Label")
+            with sc2:
+                responsible  = st.text_input("Responsible")
+                doc_format   = st.text_input("Doc. Format / System")
+            with sc3:
+                measurement  = st.text_input("Effective Measurement")
+                yes_label    = st.text_input("YES label (diamonds)", value="YES")
+                no_label     = st.text_input("NO label (diamonds)",  value="NO")
 
-with g2:
-    if st.button("📊 Generate Excel", use_container_width=True):
-        with st.spinner("Building Excel..."):
-            xl_buf=generate_excel()
-        st.success("✅ Excel Ready!")
-        st.download_button("⬇️ Download Excel",data=xl_buf,
-            file_name=f"Line_Supply_SOP_{sop_date.strftime('%d%m%Y')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+            st.markdown("**Arrow / Connection settings**")
+            ar1, ar2, ar3 = st.columns(3)
+            with ar1:
+                connect_from = st.text_input("Connect from step # (blank = auto)")
+                connect_side = st.selectbox("Arrow exits source from", CONNECT_SIDE_OPTIONS)
+            with ar2:
+                arrow_label = st.text_input("Arrow label (e.g. YES / NO / blank)")
+            with ar3:
+                loop_to    = st.text_input("Loop-back to step # (blank = none)")
+                loop_label = st.text_input("Loop arrow label")
 
-with g3:
-    if st.button("📦 Generate Both", use_container_width=True):
-        with st.spinner("Building reports..."):
-            pdf_buf2=generate_pdf(); xl_buf2=generate_excel()
-        st.success("✅ Both Ready!")
-        st.download_button("⬇️ Download PDF",data=pdf_buf2,
-            file_name=f"Line_Supply_SOP_{sop_date.strftime('%d%m%Y')}.pdf",
-            mime="application/pdf",use_container_width=True)
-        st.download_button("⬇️ Download Excel",data=xl_buf2,
-            file_name=f"Line_Supply_SOP_{sop_date.strftime('%d%m%Y')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+            if st.form_submit_button("➕ Add Step", use_container_width=True):
+                if step_text.strip():
+                    cf = str(int(connect_from.strip()) - 1) if connect_from.strip().isdigit() else ""
+                    lt = str(int(loop_to.strip()) - 1) if loop_to.strip().isdigit() else ""
+                    st.session_state.steps.append({
+                        "shape":        SHAPE_TYPES[shape_label],
+                        "text":         step_text,
+                        "column":       col_choice,
+                        "input_label":  input_label,
+                        "output_label": output_label,
+                        "responsible":  responsible,
+                        "doc_format":   doc_format,
+                        "measurement":  measurement,
+                        "yes_label":    yes_label,
+                        "no_label":     no_label,
+                        "connect_from": cf,
+                        "connect_side": connect_side,
+                        "arrow_label":  arrow_label,
+                        "loop_to":      lt,
+                        "loop_label":   loop_label,
+                    })
+                    st.success(f"✅ Step {n_steps+1} added: [{shape_label}] {step_text}")
+                    st.rerun()
+                else:
+                    st.warning("Please enter shape text.")
 
-st.markdown("---")
-st.markdown("<small style='color:#aaa;'>Composed By: Agilomatrix Pvt Ltd (connectus@agilomatrix.com) | Pinnacle Mobility — eka</small>", unsafe_allow_html=True)
+        st.divider()
+        st.subheader(f"Steps ({len(st.session_state.steps)})")
+        if not st.session_state.steps:
+            st.info("No steps yet. Use the form above to add process flow steps.")
+        else:
+            reverse_map = {v: k for k, v in SHAPE_TYPES.items()}
+            for i, step in enumerate(st.session_state.steps):
+                label   = reverse_map.get(step["shape"], step["shape"])
+                col_tag = "🔵 left" if step.get("column","left") == "left" else "🟢 right"
+                cf_raw  = step.get("connect_from","")
+                cf_disp = str(int(cf_raw)+1) if cf_raw.isdigit() else "auto"
+                lt_raw  = step.get("loop_to","")
+                lt_disp = str(int(lt_raw)+1) if lt_raw.isdigit() else "—"
+                with st.expander(f"**Step {i+1}** {col_tag} › [{label}]  {step['text']}", expanded=False):
+                    bc1, bc2, bc3, _ = st.columns([1, 1, 1, 4])
+                    if bc1.button("⬆️ Up",     key=f"up_{i}"):
+                        if i > 0:
+                            st.session_state.steps[i], st.session_state.steps[i-1] = \
+                                st.session_state.steps[i-1], st.session_state.steps[i]
+                        st.rerun()
+                    if bc2.button("⬇️ Down",   key=f"dn_{i}"):
+                        if i < len(st.session_state.steps)-1:
+                            st.session_state.steps[i], st.session_state.steps[i+1] = \
+                                st.session_state.steps[i+1], st.session_state.steps[i]
+                        st.rerun()
+                    if bc3.button("🗑️ Delete", key=f"del_{i}"):
+                        st.session_state.steps.pop(i); st.rerun()
+                    st.write(f"**Connect from:** step {cf_disp}  |  "
+                             f"**Side:** {step.get('connect_side','bottom')}  |  "
+                             f"**Arrow label:** {step.get('arrow_label') or '—'}  |  "
+                             f"**Loop to:** {lt_disp}")
+
+    # ── RIGHT: Live Preview ──────────────────────────────────────────────────
+    with preview_col:
+        st.subheader("👁️ Live Flowchart Preview")
+        st.caption("Updates automatically as you add/reorder/delete steps.")
+
+        preview_html = render_preview_html(st.session_state.steps)
+
+        # Calculate a good height for the iframe
+        n = len(st.session_state.steps)
+        # rough estimate: 88px per step + toolbar + headers + padding
+        est_h = max(320, min(900, n * 88 + 150)) if n > 0 else 260
+
+        components.html(preview_html, height=est_h, scrolling=False)
+
+        if st.session_state.steps:
+            st.markdown("---")
+            st.markdown("**Shape colour guide:**")
+            guide_cols = st.columns(4)
+            guide_items = [
+                ("🟦", "Rectangle", "Process step"),
+                ("⬛", "Oval", "Start / End"),
+                ("🟨", "Diamond", "Decision"),
+                ("🟩", "Parallelogram", "Input / Output"),
+            ]
+            for gc, (icon, name, desc) in zip(guide_cols, guide_items):
+                gc.markdown(f"{icon} **{name}**  \n{desc}")
+
+
+# ── TAB 3 ─────────────────────────────────────────────────────────────────────
+with tab3:
+    st.subheader("SOP Change Record")
+    with st.form("cr_form", clear_on_submit=True):
+        r1c1, r1c2, r1c3, r1c4 = st.columns(4)
+        sno   = r1c1.text_input("S.No.")
+        cdate = r1c2.text_input("Effective Date")
+        rev   = r1c3.text_input("REV. No.")
+        desc  = r1c4.text_input("Change Description")
+        r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+        cl    = r2c1.text_input("Change Letter")
+        prep  = r2c2.text_input("Prepared By")
+        rev2  = r2c3.text_input("Reviewed By")
+        appr  = r2c4.text_input("Approved By")
+        if st.form_submit_button("➕ Add Row", use_container_width=True):
+            st.session_state.change_records.append({
+                "sno": sno, "date": cdate, "rev": rev, "desc": desc,
+                "change_letter": cl, "prepared": prep,
+                "reviewed": rev2, "approved": appr,
+            })
+            st.success("Row added.")
+    st.divider()
+    for i, cr in enumerate(st.session_state.change_records):
+        cc1, cc2 = st.columns([9, 1])
+        cc1.write(
+            f"**{cr['sno']}** | {cr['date']} | Rev {cr['rev']} | {cr['desc']} | "
+            f"Prepared: {cr['prepared']} | Reviewed: {cr['reviewed']} | Approved: {cr['approved']}"
+        )
+        if cc2.button("🗑️", key=f"crdel_{i}"):
+            st.session_state.change_records.pop(i); st.rerun()
+
+# ── TAB 4 ─────────────────────────────────────────────────────────────────────
+with tab4:
+    st.subheader("Generate & Download PDF")
+    if not st.session_state.steps:
+        st.warning("⚠️ Add at least one process step before generating the PDF.")
+    else:
+        st.success(f"Ready — **{len(st.session_state.steps)} step(s)** will be included.")
+        meta = {k: st.session_state[k] for k in [
+            "company_name", "title", "sop_no", "rev_no", "date", "page_info",
+            "unit", "area", "sub_area", "zone", "owner", "purpose", "scope",
+            "composed_by", "change_records",
+        ]}
+        pdf_buf = generate_pdf(st.session_state.steps, meta)
+        st.download_button(
+            label="📥 Download SOP PDF",
+            data=pdf_buf, file_name="SOP_Document.pdf",
+            mime="application/pdf", use_container_width=True,
+        )
+        st.divider()
+        st.subheader("Step Summary")
+        reverse_map = {v: k for k, v in SHAPE_TYPES.items()}
+        rows = [{
+            "Step":         i + 1,
+            "Col":          s.get("column","left"),
+            "Shape":        reverse_map.get(s["shape"], s["shape"]),
+            "Text":         s["text"],
+            "Connect from": str(int(s.get("connect_from",""))+1) if s.get("connect_from","").isdigit() else "auto",
+            "Arrow label":  s.get("arrow_label",""),
+            "Loop to":      str(int(s.get("loop_to",""))+1) if s.get("loop_to","").isdigit() else "—",
+        } for i, s in enumerate(st.session_state.steps)]
+        st.dataframe(rows, use_container_width=True, hide_index=True)
