@@ -2,15 +2,31 @@ import streamlit as st
 import streamlit.components.v1 as components
 import io
 import json
-import requests
+import google.generativeai as genai
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.lib.units import mm
 
-st.set_page_config(page_title="SOP Builder — Gemini AI", layout="wide")
+st.set_page_config(page_title="SOP Builder", layout="wide")
 
-# ─── Session State ─────────────────────────────────────────────────────────────
+# ─── Sidebar API Key ──────────────────────────────────────────────────────────
+with st.sidebar:
+    st.header("🔑 API Configuration")
+    api_key = st.text_input(
+        "Google Gemini API Key",
+        type="password",
+        placeholder="AIza...",
+        value=st.session_state.get("gemini_api_key", ""),
+    )
+    if api_key:
+        st.session_state.gemini_api_key = api_key
+        st.success("API key saved ✓")
+    else:
+        st.warning("Enter your Google Gemini API key to use AI generation.")
+    st.markdown("[Get a free Gemini API key →](https://aistudio.google.com/app/apikey)", unsafe_allow_html=False)
+
+# ─── Session State ────────────────────────────────────────────────────────────
 defaults = {
     "steps": [],
     "sop_no": "SCM/STR/LS/02",
@@ -27,8 +43,9 @@ defaults = {
     "owner": "Stores Manager",
     "company_name": "PINNACLE MOBILITY",
     "composed_by": "Agilomatrix Pvt Ltd (connectus@agilomatrix.com)",
+    "ai_description": "",
+    "ai_mode": "AI Generate",
     "gemini_api_key": "",
-    "ai_chat_history": [],
     "change_records": [
         {"sno": "1", "date": "17-12-2024", "rev": "0.0", "desc": "Original Version",
          "change_letter": "NA", "prepared": "Prince S", "reviewed": "Ajay G", "approved": "Vilas B"},
@@ -48,90 +65,84 @@ SHAPE_TYPES = {
 COLUMN_OPTIONS       = ["left", "right"]
 CONNECT_SIDE_OPTIONS = ["bottom (default)", "right side →", "left side ←"]
 
-# ─── Gemini AI Helper ──────────────────────────────────────────────────────────
-def call_gemini(prompt: str, system_context: str = "") -> str:
-    api_key = st.session_state.gemini_api_key.strip()
+AI_SYSTEM_PROMPT = """You are an expert SOP (Standard Operating Procedure) process flow designer.
+Convert the user's plain-English process description into a JSON array of flowchart steps.
+
+Shape rules:
+- "oval"          → Start / End terminators ONLY
+- "rect"          → Regular process/action steps
+- "diamond"       → Decisions or checks (has yes/no branches)
+- "parallelogram" → Inputs or outputs (receiving, generating, sending)
+- "arrow_text"    → Short annotations only
+
+Column rules:
+- "left"  → main flow
+- "right" → branch (decision outcome that diverges from main path)
+
+Connection rules:
+- "connect_from": 0-based index of the parent step, or null for automatic
+- "connect_side": "bottom (default)" | "right side →" | "left side ←"
+- "arrow_label":  "" | "YES" | "NO" | short label
+- "loop_to":      0-based index to loop back to, or null
+- "loop_label":   label for the loop arrow
+
+Return ONLY valid JSON array with NO markdown, NO explanation, NO backticks.
+Every step must have ALL these keys:
+shape, text, column, connect_from, connect_side, arrow_label,
+loop_to, loop_label, input_label, output_label, responsible,
+doc_format, measurement, yes_label, no_label
+"""
+
+EXAMPLES = [
+    "Start → Receive purchase order → Check stock availability → If stock available (YES): Pick and pack items → Generate invoice → Ship to customer → End. If not available (NO): Raise procurement request → Wait for delivery → loop back to Check stock availability",
+    "Employee raises leave request → Manager reviews → If approved (YES): Update HR system → Notify employee → End. If rejected (NO): Send rejection email with reason → Employee can appeal → loop back to Manager reviews",
+    "Raw material arrives → Inspect quality → If pass (YES): Move to production → Manufacture product → Final QC check → If QC pass (YES): Pack and label → Dispatch → End. If QC fail (NO): Rework or scrap",
+]
+
+# ─── AI Generator (Google Gemini) ─────────────────────────────────────────────
+def generate_steps_with_ai(description: str):
+    api_key = st.session_state.get("gemini_api_key", "").strip()
     if not api_key:
-        return "⚠️ Please enter your Gemini API key in the sidebar."
+        st.error("⚠️ Google Gemini API key not found. Please enter your API key in the sidebar.")
+        return None
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
-    full_prompt = f"{system_context}\n\n{prompt}" if system_context else prompt
-
-    payload = {
-        "contents": [{"parts": [{"text": full_prompt}]}],
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1500},
-    }
-    try:
-        resp = requests.post(url, json=payload, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except requests.exceptions.HTTPError as e:
-        if resp.status_code == 400:
-            return "❌ Invalid Gemini API key. Please check and re-enter."
-        elif resp.status_code == 429:
-            return "❌ Gemini quota exceeded. Try again later or upgrade your plan."
-        return f"❌ API error: {e}"
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
-
-
-def gemini_suggest_next_step() -> dict:
-    steps_ctx = "\n".join([f"{i+1}. [{s['shape']}] {s['text']}" for i, s in enumerate(st.session_state.steps)])
-    system = (
-        "You are an SOP process design expert. Given the existing steps, suggest ONE logical next step. "
-        "Reply ONLY with a valid JSON object (no markdown, no backticks): "
-        '{"shape":"rect|diamond|oval|parallelogram|arrow_text","text":"...","responsible":"...","input_label":"","output_label":"","arrow_label":""}'
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        model_name="gemini-1.5-flash",
+        system_instruction=AI_SYSTEM_PROMPT,
     )
-    user = f"SOP Title: {st.session_state.title}\nExisting steps:\n{steps_ctx if steps_ctx else 'None yet'}\n\nSuggest the next step."
-    raw = call_gemini(user, system)
-    raw = raw.strip().replace("```json", "").replace("```", "").strip()
-    try:
-        return json.loads(raw)
-    except Exception:
-        return {"shape": "rect", "text": raw[:80], "responsible": "", "input_label": "", "output_label": "", "arrow_label": ""}
 
+    prompt = f"Convert this process into SOP flowchart steps:\n\n{description}"
+    response = model.generate_content(prompt)
+    raw = response.text.strip()
 
-def gemini_generate_full_sop(description: str) -> list:
-    system = (
-        "You are an SOP process design expert. Generate a complete list of SOP steps based on the description. "
-        "Reply ONLY with a valid JSON array (no markdown, no backticks): "
-        '[{"shape":"rect|diamond|oval|parallelogram","text":"...","responsible":"...","input_label":"","output_label":"","arrow_label":"","measurement":"","doc_format":""},...]'
-        "\nUse 'diamond' for decision/check steps, 'oval' for start/end, 'rect' for normal process steps, 'parallelogram' for input/output."
-    )
-    raw = call_gemini(description, system)
-    raw = raw.strip().replace("```json", "").replace("```", "").strip()
-    try:
-        return json.loads(raw)
-    except Exception:
-        return []
+    # Strip any accidental markdown fences
+    raw = raw.replace("```json", "").replace("```", "").strip()
 
+    parsed = json.loads(raw)
+    if not isinstance(parsed, list):
+        raise ValueError("AI returned non-list JSON")
 
-def gemini_analyze_flow() -> str:
-    steps_ctx = "\n".join([f"{i+1}. [{s['shape']}] {s['text']} (resp: {s.get('responsible','')})" for i, s in enumerate(st.session_state.steps)])
-    system = "You are a process improvement expert. Analyze the SOP flow and give concise feedback: gaps, inefficiencies, missing steps, suggestions. Keep it under 150 words."
-    user = f"SOP Title: {st.session_state.title}\nSteps:\n{steps_ctx}"
-    return call_gemini(user, system)
+    # Normalise every step
+    for step in parsed:
+        step.setdefault("input_label", "")
+        step.setdefault("output_label", "")
+        step.setdefault("responsible", "")
+        step.setdefault("doc_format", "")
+        step.setdefault("measurement", "")
+        step.setdefault("yes_label", "YES")
+        step.setdefault("no_label", "NO")
+        step.setdefault("connect_from", None)
+        step.setdefault("connect_side", "bottom (default)")
+        step.setdefault("arrow_label", "")
+        step.setdefault("loop_to", None)
+        step.setdefault("loop_label", "")
+        step.setdefault("column", "left")
+        step["connect_from"] = str(step["connect_from"]) if step["connect_from"] is not None else ""
+        step["loop_to"]      = str(step["loop_to"])      if step["loop_to"]      is not None else ""
+    return parsed
 
-
-def gemini_improve_step(step_text: str) -> str:
-    system = "You are an SOP writing expert. Improve the given step text to be clearer, more action-oriented, and professional. Reply with ONLY the improved text (no quotes, no explanation)."
-    return call_gemini(f"Improve this SOP step: {step_text}", system)
-
-
-def gemini_chat(user_message: str) -> str:
-    history_ctx = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.ai_chat_history[-6:]])
-    steps_ctx = "\n".join([f"{i+1}. [{s['shape']}] {s['text']}" for i, s in enumerate(st.session_state.steps)])
-    system = (
-        f"You are an SOP expert assistant. The user is building an SOP titled '{st.session_state.title}'. "
-        f"Current steps:\n{steps_ctx if steps_ctx else 'None yet'}\n\n"
-        "Answer questions, give advice, or help improve the SOP. Be concise and practical."
-    )
-    full_prompt = f"{history_ctx}\nUSER: {user_message}" if history_ctx else f"USER: {user_message}"
-    return call_gemini(full_prompt, system)
-
-
-# ─── SVG Preview ───────────────────────────────────────────────────────────────
+# ─── SVG Preview ──────────────────────────────────────────────────────────────
 def generate_svg_preview(steps):
     if not steps:
         return """
@@ -150,7 +161,7 @@ def generate_svg_preview(steps):
     SHAPE_H  = {"rect": 60, "oval": 50, "parallelogram": 60, "diamond": 80, "arrow_text": 30}
     V_GAP = 28; TOP_Y = 40
 
-    paired_rows = []; step_to_pair = {}
+    paired_rows  = []; step_to_pair = {}
     for idx, step in enumerate(steps):
         col = step.get("column", "left")
         if col == "right":
@@ -191,17 +202,18 @@ def generate_svg_preview(steps):
                 cur = w
         if cur: lines.append(cur)
         return lines or [""]
-    def text_lines_svg(lines, cx, mid_y, font_size=11, fill="#1a1a1a"):
-        lh = font_size+3; total = len(lines)*lh; y0 = mid_y-total/2+lh*0.75; out = ""
+    def text_lines_svg(lines, cx, mid_y, font_size=11, bold=False, fill="#1a1a1a"):
+        lh = font_size+3; total = len(lines)*lh; y0 = mid_y-total/2+lh*0.75
+        weight = "600" if bold else "400"; out = ""
         for i, line in enumerate(lines):
-            out += f'<text x="{cx}" y="{y0+i*lh:.1f}" text-anchor="middle" font-size="{font_size}" fill="{fill}" font-family="\'Segoe UI\',sans-serif">{esc(line)}</text>'
+            out += f'<text x="{cx}" y="{y0+i*lh:.1f}" text-anchor="middle" font-size="{font_size}" font-weight="{weight}" fill="{fill}" font-family="\'Segoe UI\',sans-serif">{esc(line)}</text>'
         return out
     def arrowhead_d(tx, ty, direction="down"):
         sz = 5
-        if direction == "down":   return f"M{tx},{ty} L{tx-sz},{ty-sz*1.5} L{tx+sz},{ty-sz*1.5} Z"
+        if direction == "down":    return f"M{tx},{ty} L{tx-sz},{ty-sz*1.5} L{tx+sz},{ty-sz*1.5} Z"
         elif direction == "right": return f"M{tx},{ty} L{tx-sz*1.5},{ty-sz} L{tx-sz*1.5},{ty+sz} Z"
         elif direction == "left":  return f"M{tx},{ty} L{tx+sz*1.5},{ty-sz} L{tx+sz*1.5},{ty+sz} Z"
-        else: return f"M{tx},{ty} L{tx-sz},{ty+sz*1.5} L{tx+sz},{ty+sz*1.5} Z"
+        else:                      return f"M{tx},{ty} L{tx-sz},{ty+sz*1.5} L{tx+sz},{ty+sz*1.5} Z"
 
     ARROW_COLOR = "#4a5568"; YES_COLOR = "#276749"; NO_COLOR = "#c53030"
     arrow_svg = ""
@@ -321,6 +333,7 @@ def generate_svg_preview(steps):
 
     return f"""
     <svg width="{SVG_W}" height="{SVG_H}" viewBox="0 0 {SVG_W} {SVG_H}" xmlns="http://www.w3.org/2000/svg">
+      <style>.sop-node{{cursor:pointer}}.sop-node:hover{{opacity:0.85}}</style>
       <defs><pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
         <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#F0F4F8" stroke-width="0.5"/></pattern></defs>
       <rect width="{SVG_W}" height="{SVG_H}" fill="#FAFBFC"/>
@@ -369,8 +382,7 @@ def render_preview_html(steps):
     document.getElementById('zoom-label').textContent='100%';}}
 </script></body></html>"""
 
-
-# ─── PDF Helpers ───────────────────────────────────────────────────────────────
+# ─── PDF Helpers ──────────────────────────────────────────────────────────────
 def wrapped_lines(c, text, max_w, font_name, font_size):
     words=str(text).split(); lines=[]; cur=""
     for w in words:
@@ -396,10 +408,14 @@ def draw_left_text(c, text, x, cy, max_w, font_name="Helvetica", font_size=6.5, 
 
 def arrowhead(c, tip_x, tip_y, direction="down"):
     size=3.5; c.setFillColor(colors.black); p=c.beginPath()
-    if direction=="down": p.moveTo(tip_x,tip_y); p.lineTo(tip_x-size,tip_y+size*1.5); p.lineTo(tip_x+size,tip_y+size*1.5)
-    elif direction=="up": p.moveTo(tip_x,tip_y); p.lineTo(tip_x-size,tip_y-size*1.5); p.lineTo(tip_x+size,tip_y-size*1.5)
-    elif direction=="right": p.moveTo(tip_x,tip_y); p.lineTo(tip_x-size*1.5,tip_y+size); p.lineTo(tip_x-size*1.5,tip_y-size)
-    elif direction=="left": p.moveTo(tip_x,tip_y); p.lineTo(tip_x+size*1.5,tip_y+size); p.lineTo(tip_x+size*1.5,tip_y-size)
+    if direction=="down":
+        p.moveTo(tip_x,tip_y); p.lineTo(tip_x-size,tip_y+size*1.5); p.lineTo(tip_x+size,tip_y+size*1.5)
+    elif direction=="up":
+        p.moveTo(tip_x,tip_y); p.lineTo(tip_x-size,tip_y-size*1.5); p.lineTo(tip_x+size,tip_y-size*1.5)
+    elif direction=="right":
+        p.moveTo(tip_x,tip_y); p.lineTo(tip_x-size*1.5,tip_y+size); p.lineTo(tip_x-size*1.5,tip_y-size)
+    elif direction=="left":
+        p.moveTo(tip_x,tip_y); p.lineTo(tip_x+size*1.5,tip_y+size); p.lineTo(tip_x+size*1.5,tip_y-size)
     p.close(); c.drawPath(p, fill=1, stroke=0)
 
 def draw_arrow_down(c, x, y_from, y_to, color=colors.black):
@@ -410,7 +426,7 @@ def draw_elbow_arrow(c, sx, sy, ex, ey, color=colors.black, label="", label_colo
     c.setStrokeColor(color); c.setLineWidth(0.8); size=3.5
     c.line(sx, sy, ex, sy)
     if ey<sy: c.line(ex, sy, ex, ey+size*1.5); arrowhead(c, ex, ey, "down")
-    else: c.line(ex, sy, ex, ey-size*1.5); arrowhead(c, ex, ey, "up")
+    else:     c.line(ex, sy, ex, ey-size*1.5); arrowhead(c, ex, ey, "up")
     if label:
         c.setFont("Helvetica-Bold",6); c.setFillColor(label_color)
         c.drawCentredString((sx+ex)/2, sy+2.5, label)
@@ -418,23 +434,27 @@ def draw_elbow_arrow(c, sx, sy, ex, ey, color=colors.black, label="", label_colo
 
 def draw_rect_shape(c, x, y, w, h, text, font_size=7):
     c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.8)
-    c.rect(x, y, w, h, fill=1, stroke=1); draw_centered_text(c, text, x+w/2, y+h/2, w-4, font_size=font_size)
+    c.rect(x, y, w, h, fill=1, stroke=1)
+    draw_centered_text(c, text, x+w/2, y+h/2, w-4, font_size=font_size)
 
 def draw_oval_shape(c, x, y, w, h, text, font_size=7):
     c.setStrokeColor(colors.black); c.setFillColor(colors.HexColor("#2c2c2c")); c.setLineWidth(0.8)
-    c.ellipse(x, y, x+w, y+h, fill=1, stroke=1); draw_centered_text(c, text, x+w/2, y+h/2, w-6, font_size=font_size, color=colors.white)
+    c.ellipse(x, y, x+w, y+h, fill=1, stroke=1)
+    draw_centered_text(c, text, x+w/2, y+h/2, w-6, font_size=font_size, color=colors.white)
 
 def draw_diamond_shape(c, x, y, w, h, text, font_size=6.5):
     cx,cy=x+w/2,y+h/2; p=c.beginPath()
     p.moveTo(cx,y+h); p.lineTo(x+w,cy); p.lineTo(cx,y); p.lineTo(x,cy); p.close()
     c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.8)
-    c.drawPath(p, fill=1, stroke=1); draw_centered_text(c, text, cx, cy, w*0.55, font_size=font_size)
+    c.drawPath(p, fill=1, stroke=1)
+    draw_centered_text(c, text, cx, cy, w*0.55, font_size=font_size)
 
 def draw_parallelogram_shape(c, x, y, w, h, text, font_size=7):
     skew=7; p=c.beginPath()
     p.moveTo(x+skew,y+h); p.lineTo(x+w,y+h); p.lineTo(x+w-skew,y); p.lineTo(x,y); p.close()
     c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.8)
-    c.drawPath(p, fill=1, stroke=1); draw_centered_text(c, text, x+w/2, y+h/2, w-10, font_size=font_size)
+    c.drawPath(p, fill=1, stroke=1)
+    draw_centered_text(c, text, x+w/2, y+h/2, w-10, font_size=font_size)
 
 def draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_bottoms):
     ML_x=XS[0]; total_w=XS[-1]-XS[0]; total_h=table_top-table_bottom
@@ -446,7 +466,7 @@ def draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_botto
     c.setLineWidth(0.4)
     for row_bottom in row_bottoms[:-1]:
         y=row_bottom
-        if FLOW_COL_IDX>0: c.line(XS[0], y, XS[FLOW_COL_IDX], y)
+        if FLOW_COL_IDX>0:         c.line(XS[0], y, XS[FLOW_COL_IDX], y)
         if FLOW_COL_IDX<len(XS)-2: c.line(XS[FLOW_COL_IDX+1], y, XS[-1], y)
 
 def generate_pdf(steps, meta):
@@ -455,10 +475,12 @@ def generate_pdf(steps, meta):
     HEADER_H=22*mm; left_w=44*mm; right_w=83*mm; centre_w=TW-left_w-right_w
     c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
     c.drawString(ML, cur_y-7, meta["company_name"])
+    c.setFont("Helvetica-Bold",10); c.setFillColor(colors.HexColor("#1a6dcc"))
+    c.drawString(ML, cur_y-18, "eka"); c.setFillColor(colors.black)
     cx_title=ML+left_w+centre_w/2
     c.setFont("Helvetica-Bold",13); c.drawCentredString(cx_title, cur_y-7, "STANDARD OPERATING PROCEDURE")
     c.setFont("Helvetica",8.5); draw_centered_text(c, meta["title"], cx_title, cur_y-18, centre_w-4, font_size=8.5)
-    RX=ML+left_w+centre_w; c1w,c2w,c3w=18*mm,24*mm,12*mm; c4w=right_w-c1w-c2w-c3w; rh=HEADER_H/4
+    RX=ML+left_w+centre_w; c1w,c2w,c3w=18*mm,24*mm,12*mm; rh=HEADER_H/4
     meta_rows=[("SOP No.",meta["sop_no"],"Page",meta["page_info"]),
                ("Rev No.",meta["rev_no"],"Date",meta["date"]),
                ("Unit",meta["unit"],"Area",meta["area"]),
@@ -475,8 +497,9 @@ def generate_pdf(steps, meta):
     c.setLineWidth(1); c.line(ML, cur_y-HEADER_H, ML+TW, cur_y-HEADER_H); cur_y-=HEADER_H
     PS_H=8*mm; PL_W,PV_W,SL_W=18*mm,82*mm,14*mm; SV_W=TW-PL_W-PV_W-SL_W
     c.setLineWidth(0.6)
-    for x,w,txt,bold,centre in [(ML,PL_W,"Purpose",True,False),(ML+PL_W,PV_W,meta["purpose"],False,False),
-                                  (ML+PL_W+PV_W,SL_W,"Scope",True,False),(ML+PL_W+PV_W+SL_W,SV_W,meta["scope"],False,True)]:
+    for x,w,txt,bold,centre in [
+        (ML,PL_W,"Purpose",True,False),(ML+PL_W,PV_W,meta["purpose"],False,False),
+        (ML+PL_W+PV_W,SL_W,"Scope",True,False),(ML+PL_W+PV_W+SL_W,SV_W,meta["scope"],False,True)]:
         c.setFillColor(colors.white); c.rect(x,cur_y-PS_H,w,PS_H,fill=1,stroke=1); c.setFillColor(colors.black)
         if bold: c.setFont("Helvetica-Bold",8); c.drawString(x+2, cur_y-PS_H+2.5, txt)
         elif centre: draw_centered_text(c, txt, x+w/2, cur_y-PS_H/2, w-4, font_size=6.5)
@@ -486,7 +509,7 @@ def generate_pdf(steps, meta):
     COL_FLOW=TW-COL_IN-COL_OUT-COL_RESP-COL_DOC-COL_MEAS; FLOW_COL_IDX=1
     XS=[ML,ML+COL_IN,ML+COL_IN+COL_FLOW,ML+COL_IN+COL_FLOW+COL_OUT,
         ML+COL_IN+COL_FLOW+COL_OUT+COL_RESP,ML+COL_IN+COL_FLOW+COL_OUT+COL_RESP+COL_DOC,ML+TW]
-    FLOW_L=XS[1]; FLOW_R=XS[2]; SH_W_L=COL_FLOW*0.44-2*mm; SH_W_R=COL_FLOW*0.44-2*mm
+    FLOW_L=XS[1]; SH_W_L=COL_FLOW*0.44-2*mm; SH_W_R=COL_FLOW*0.44-2*mm
     LEFT_CX=FLOW_L+COL_FLOW*0.25; RIGHT_CX=FLOW_L+COL_FLOW*0.75
     HDR1_H=7*mm; c.setFillColor(colors.HexColor("#DDEEFF"))
     c.rect(ML,cur_y-HDR1_H,TW,HDR1_H,fill=1,stroke=1)
@@ -499,7 +522,8 @@ def generate_pdf(steps, meta):
         cw=XS[i+1]-XS[i]; c.setFillColor(colors.HexColor("#EEF3FF"))
         c.rect(XS[i],cur_y-HDR2_H,cw,HDR2_H,fill=1,stroke=1); c.setFillColor(colors.black)
         lines=label.split("\n"); lh=6.5; sy=cur_y-HDR2_H/2+(len(lines)-1)*lh/2
-        for li,ln in enumerate(lines): c.setFont("Helvetica-Bold",6.5); c.drawCentredString(XS[i]+cw/2, sy-li*(lh+0.5), ln)
+        for li,ln in enumerate(lines):
+            c.setFont("Helvetica-Bold",6.5); c.drawCentredString(XS[i]+cw/2, sy-li*(lh+0.5), ln)
     cur_y-=HDR2_H
     SHAPE_H={"rect":9*mm,"oval":9*mm,"parallelogram":9*mm,"diamond":15*mm,"arrow_text":6*mm}
     V_PAD=5*mm; table_top=cur_y
@@ -511,12 +535,14 @@ def generate_pdf(steps, meta):
             for pi in range(len(paired_rows)-1,-1,-1):
                 if paired_rows[pi]["right"] is None:
                     paired_rows[pi]["right"]=idx; step_to_pair[idx]=pi; paired=True; break
-            if not paired: paired_rows.append({"left":None,"right":idx}); step_to_pair[idx]=len(paired_rows)-1
-        else: paired_rows.append({"left":idx,"right":None}); step_to_pair[idx]=len(paired_rows)-1
+            if not paired:
+                paired_rows.append({"left":None,"right":idx}); step_to_pair[idx]=len(paired_rows)-1
+        else:
+            paired_rows.append({"left":idx,"right":None}); step_to_pair[idx]=len(paired_rows)-1
     row_geom=[]; scan_y=cur_y
     for pair in paired_rows:
-        h_left=SHAPE_H.get(steps[pair["left"]]["shape"],9*mm) if pair["left"] is not None else 0
-        h_right=SHAPE_H.get(steps[pair["right"]]["shape"],9*mm) if pair["right"] is not None else 0
+        h_left =SHAPE_H.get(steps[pair["left"]]["shape"],  9*mm) if pair["left"]  is not None else 0
+        h_right=SHAPE_H.get(steps[pair["right"]]["shape"], 9*mm) if pair["right"] is not None else 0
         ROW_H=max(h_left,h_right)+2*V_PAD; ry=scan_y-ROW_H
         row_geom.append({"ry":ry,"ROW_H":ROW_H}); scan_y=ry
     table_bottom=scan_y
@@ -558,7 +584,7 @@ def generate_pdf(steps, meta):
                         draw_arrow_down(c, a["cx"], s["bot"], a["top"], color=arr_color)
                         if arrow_label:
                             c.setFont("Helvetica-Bold",6); c.setFillColor(lbl_color)
-                            c.drawCentredString(a["cx"]+6, (s["bot"]+a["top"])/2, arrow_label); c.setFillColor(colors.black)
+                            c.drawCentredString(a["cx"]+6,(s["bot"]+a["top"])/2,arrow_label); c.setFillColor(colors.black)
                     else:
                         draw_elbow_arrow(c, s["cx"], s["bot"], a["cx"], a["top"], color=arr_color, label=arrow_label, label_color=lbl_color)
         else:
@@ -584,8 +610,8 @@ def generate_pdf(steps, meta):
                 c.setStrokeColor(colors.black)
     for idx,step in enumerate(steps):
         a=anchors[idx]; sh_x,sh_bot=a["sh_x"],a["sh_bot"]; sh_w,sh_h=a["sh_w"],a["sh_h"]; shape=step["shape"]
-        if shape=="rect": draw_rect_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
-        elif shape=="oval": draw_oval_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
+        if shape=="rect":            draw_rect_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
+        elif shape=="oval":          draw_oval_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
         elif shape=="diamond":
             draw_diamond_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
             yes_lbl=step.get("yes_label","YES") or "YES"; no_lbl=step.get("no_label","NO") or "NO"
@@ -597,8 +623,7 @@ def generate_pdf(steps, meta):
         elif shape=="arrow_text":
             c.setFont("Helvetica-Oblique",7); c.setFillColor(colors.HexColor("#333333"))
             c.drawCentredString(a["cx"], a["cy"], step["text"]); c.setFillColor(colors.black)
-    cur_y=table_bottom
-    cur_y-=4*mm; CR_TITLE_H=6*mm
+    cur_y=table_bottom; cur_y-=4*mm; CR_TITLE_H=6*mm
     c.setFillColor(colors.HexColor("#DDEEFF")); c.rect(ML,cur_y-CR_TITLE_H,TW,CR_TITLE_H,fill=1,stroke=1)
     c.setFont("Helvetica-Bold",8); c.setFillColor(colors.black)
     c.drawCentredString(ML+TW/2, cur_y-CR_TITLE_H+2, "SOP Change Record"); cur_y-=CR_TITLE_H
@@ -612,7 +637,8 @@ def generate_pdf(steps, meta):
         cw=CR_XS[i+1]-CR_XS[i]; c.setFillColor(colors.HexColor("#EEF3FF"))
         c.rect(CR_XS[i],cur_y-CR_HDR_H,cw,CR_HDR_H,fill=1,stroke=1); c.setFillColor(colors.black)
         lines=label.split("\n"); lh=6; sy=cur_y-CR_HDR_H/2+(len(lines)-1)*lh/2
-        for li,ln in enumerate(lines): c.setFont("Helvetica-Bold",5.5); c.drawCentredString(CR_XS[i]+cw/2, sy-li*(lh+0.5), ln)
+        for li,ln in enumerate(lines):
+            c.setFont("Helvetica-Bold",5.5); c.drawCentredString(CR_XS[i]+cw/2, sy-li*(lh+0.5), ln)
     cur_y-=CR_HDR_H; CR_ROW_H=6*mm
     for row in meta.get("change_records",[]):
         vals=[row.get("sno",""),row.get("date",""),row.get("rev",""),row.get("desc",""),
@@ -626,76 +652,26 @@ def generate_pdf(steps, meta):
     c.drawCentredString(ML+TW/2, cur_y-5, f"Composed By: {meta['composed_by']}")
     c.save(); buf.seek(0); return buf
 
-
-def build_sop_json():
-    return {
-        "header": {k: st.session_state[k] for k in [
-            "company_name","title","sop_no","rev_no","date","page_info",
-            "unit","area","sub_area","zone","owner","purpose","scope","composed_by"]},
-        "steps": st.session_state.steps,
-        "change_records": st.session_state.change_records,
-    }
-
-
-# ─── Sidebar — Gemini API Key ──────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("## 🤖 Gemini AI Settings")
-    st.markdown(
-        "Get a **free** API key at "
-        "[aistudio.google.com](https://aistudio.google.com/app/apikey)",
-        unsafe_allow_html=False,
-    )
-    key_input = st.text_input(
-        "Gemini API Key",
-        value=st.session_state.gemini_api_key,
-        type="password",
-        placeholder="AIza...",
-        help="Gemini 2.0 Flash is used — generous free tier, no credit card needed.",
-    )
-    if key_input != st.session_state.gemini_api_key:
-        st.session_state.gemini_api_key = key_input
-
-    if st.session_state.gemini_api_key:
-        st.success("✅ API key set")
-    else:
-        st.warning("⚠️ Enter key to use AI features")
-
-    st.divider()
-    st.markdown("**Model:** `gemini-2.0-flash`")
-    st.markdown("**Free tier:** 15 req/min · 1M tokens/day")
-    st.markdown("[Get free key →](https://aistudio.google.com/app/apikey)")
-
-    st.divider()
-    st.markdown("**Steps loaded:** " + str(len(st.session_state.steps)))
-    if st.button("🗑️ Clear all steps", use_container_width=True):
-        st.session_state.steps = []
-        st.rerun()
-
-
-# ─── Main UI ──────────────────────────────────────────────────────────────────
+# ─── Streamlit UI ─────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     .block-container { padding-top: 1rem; }
-    h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
+    h1 { font-size: 1.35rem; margin-bottom: 0.2rem; }
     h2 { font-size: 1.05rem; }
     .stButton > button { width: 100%; }
-    .gemini-badge {
-        display:inline-block; background:#1a73e8; color:white;
-        padding:3px 12px; border-radius:20px; font-size:12px; margin-left:8px;
+    .ai-banner {
+        background: linear-gradient(135deg, #E6F4EA, #E8F0FE);
+        border: 1.5px solid #34A853; border-radius: 10px;
+        padding: 12px 16px; margin-bottom: 12px;
+        font-size: 13px; color: #1a3d2b;
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📋 SOP Builder")
-st.caption("Standard Operating Procedure builder powered by Google Gemini AI (free tier)")
+st.title("📋 SOP Builder — Standard Operating Procedure")
+st.caption("Fill in the details, build your process flow, then download as PDF.")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "🏷️ Header Info",
-    "🔷 Process Flow",
-    "🤖 Gemini AI Tools",
-    "📝 Change Record",
-    "📄 Export",
-])
+tab1, tab2, tab3, tab4 = st.tabs(["🏷️ Header Info", "🤖 Process Flow", "📝 Change Record", "📄 Download PDF"])
 
 # ── TAB 1 ──────────────────────────────────────────────────────────────────────
 with tab1:
@@ -723,11 +699,84 @@ with tab1:
 
 # ── TAB 2 ──────────────────────────────────────────────────────────────────────
 with tab2:
+    st.markdown("""
+    <div class="ai-banner">
+        ✨ <b>Gemini-Powered Flow Builder</b> — Describe your process in plain English and let Google Gemini generate
+        the full flowchart structure automatically. Or switch to Manual mode to add steps one by one.
+    </div>
+    """, unsafe_allow_html=True)
+
+    mode_col, _ = st.columns([2, 5])
+    with mode_col:
+        mode = st.radio("Input mode", ["🤖 AI Generate", "✏️ Manual"], horizontal=True,
+                        label_visibility="collapsed")
+    st.session_state.ai_mode = mode
+
     input_col, preview_col = st.columns([1, 1], gap="large")
 
     with input_col:
-        with st.expander("📖 How to build branching flows", expanded=False):
-            st.markdown("""
+        if "AI" in mode:
+            st.subheader("✍️ Describe Your Process")
+            st.caption("Write naturally — mention decisions (YES/NO), branches, loops, and who does what.")
+
+            st.markdown("**Quick examples:**")
+            ex_cols = st.columns(3)
+            example_labels = ["📦 Procurement", "🏖️ Leave Approval", "🏭 Manufacturing QC"]
+            for i, (ec, el) in enumerate(zip(ex_cols, example_labels)):
+                if ec.button(el, key=f"ex_{i}"):
+                    st.session_state.ai_description = EXAMPLES[i]
+                    st.rerun()
+
+            description = st.text_area(
+                "Process description",
+                value=st.session_state.ai_description,
+                height=200,
+                placeholder="e.g. Start → Receive goods → Inspect quality → If OK: update stock → notify manager → End.",
+                label_visibility="collapsed",
+                key="ai_desc_input",
+            )
+            st.session_state.ai_description = description
+
+            gen_col, clr_col = st.columns([3, 1])
+            with gen_col:
+                generate_btn = st.button("✨ Generate Flowchart with Gemini", type="primary", use_container_width=True)
+            with clr_col:
+                if st.button("🗑️ Clear", use_container_width=True):
+                    st.session_state.steps = []
+                    st.session_state.ai_description = ""
+                    st.rerun()
+
+            if generate_btn:
+                if not description.strip():
+                    st.warning("Please describe your process first.")
+                elif not st.session_state.get("gemini_api_key", "").strip():
+                    st.error("⚠️ Please enter your Google Gemini API key in the sidebar first.")
+                else:
+                    with st.spinner("✨ Gemini is reading your process and building the flowchart…"):
+                        try:
+                            result = generate_steps_with_ai(description)
+                            if result:
+                                st.session_state.steps = result
+                                st.success(f"✅ Generated {len(result)} steps! See the live preview →")
+                                st.rerun()
+                        except json.JSONDecodeError:
+                            st.error("⚠️ AI returned unexpected output. Try rephrasing your description.")
+                        except Exception as e:
+                            st.error(f"⚠️ Error: {e}")
+
+            with st.expander("💡 Tips for best results", expanded=False):
+                st.markdown("""
+- **Use arrows** `→` to indicate flow between steps
+- **Say YES/NO** after decisions: *"If approved (YES): … If rejected (NO): …"*
+- **Mention loops**: *"loop back to step X"*
+- **Name roles**: *"Manager approves"* → fills Responsible column
+- **Name documents**: *"Fill Form F-12"* → fills Doc Format column
+- **Short sentences** per step give cleaner shape labels
+                """)
+
+        else:
+            with st.expander("📖 How to build branching flows", expanded=False):
+                st.markdown("""
 **Two columns:** `left` (main flow) and `right` (branch).
 
 | Field | What it does |
@@ -736,71 +785,74 @@ with tab2:
 | **Arrow exits from** | Which side of source shape the arrow leaves |
 | **Arrow label** | Text on arrow (e.g. `YES`, `NO`) |
 | **Loop-back to step #** | Draws a loop arrow back to an earlier step |
-            """)
+                """)
 
-        st.subheader("Add a Process Step")
-        n_steps = len(st.session_state.steps)
+            st.subheader("Add a Process Step")
+            n_steps = len(st.session_state.steps)
 
-        with st.form("add_step_form", clear_on_submit=True):
-            fa, fb = st.columns([2, 3])
-            with fa:
-                shape_label = st.selectbox("Shape Type", list(SHAPE_TYPES.keys()))
-                col_choice  = st.selectbox("Column", COLUMN_OPTIONS)
-            with fb:
-                step_text = st.text_input("Text inside shape *")
+            with st.form("add_step_form", clear_on_submit=True):
+                fa, fb = st.columns([2, 3])
+                with fa:
+                    shape_label = st.selectbox("Shape Type", list(SHAPE_TYPES.keys()))
+                    col_choice  = st.selectbox("Column (left = main flow)", COLUMN_OPTIONS)
+                with fb:
+                    step_text = st.text_input("Text inside shape *")
 
-            st.markdown("**Side-column data (optional)**")
-            sc1, sc2, sc3 = st.columns(3)
-            with sc1:
-                input_label  = st.text_input("Input Label")
-                output_label = st.text_input("Output Label")
-            with sc2:
-                responsible = st.text_input("Responsible")
-                doc_format  = st.text_input("Doc. Format / System")
-            with sc3:
-                measurement = st.text_input("Effective Measurement")
-                yes_label   = st.text_input("YES label (diamonds)", value="YES")
-                no_label    = st.text_input("NO label (diamonds)",  value="NO")
+                st.markdown("**Side-column data (optional)**")
+                sc1, sc2, sc3 = st.columns(3)
+                with sc1:
+                    input_label  = st.text_input("Input Label")
+                    output_label = st.text_input("Output Label")
+                with sc2:
+                    responsible = st.text_input("Responsible")
+                    doc_format  = st.text_input("Doc. Format / System")
+                with sc3:
+                    measurement = st.text_input("Effective Measurement")
+                    yes_label   = st.text_input("YES label (diamonds)", value="YES")
+                    no_label    = st.text_input("NO label (diamonds)",  value="NO")
 
-            st.markdown("**Arrow / Connection settings**")
-            ar1, ar2, ar3 = st.columns(3)
-            with ar1:
-                connect_from = st.text_input("Connect from step # (blank = auto)")
-                connect_side = st.selectbox("Arrow exits source from", CONNECT_SIDE_OPTIONS)
-            with ar2:
-                arrow_label = st.text_input("Arrow label (YES / NO / blank)")
-            with ar3:
-                loop_to    = st.text_input("Loop-back to step # (blank = none)")
-                loop_label = st.text_input("Loop arrow label")
+                st.markdown("**Arrow / Connection settings**")
+                ar1, ar2, ar3 = st.columns(3)
+                with ar1:
+                    connect_from = st.text_input("Connect from step # (blank = auto)")
+                    connect_side = st.selectbox("Arrow exits source from", CONNECT_SIDE_OPTIONS)
+                with ar2:
+                    arrow_label = st.text_input("Arrow label (e.g. YES / NO / blank)")
+                with ar3:
+                    loop_to    = st.text_input("Loop-back to step # (blank = none)")
+                    loop_label = st.text_input("Loop arrow label")
 
-            if st.form_submit_button("➕ Add Step", use_container_width=True):
-                if step_text.strip():
-                    cf = str(int(connect_from.strip())-1) if connect_from.strip().isdigit() else ""
-                    lt = str(int(loop_to.strip())-1)     if loop_to.strip().isdigit()     else ""
-                    st.session_state.steps.append({
-                        "shape": SHAPE_TYPES[shape_label], "text": step_text,
-                        "column": col_choice, "input_label": input_label,
-                        "output_label": output_label, "responsible": responsible,
-                        "doc_format": doc_format, "measurement": measurement,
-                        "yes_label": yes_label, "no_label": no_label,
-                        "connect_from": cf, "connect_side": connect_side,
-                        "arrow_label": arrow_label, "loop_to": lt, "loop_label": loop_label,
-                    })
-                    st.success(f"✅ Step {n_steps+1} added: [{shape_label}] {step_text}")
-                    st.rerun()
-                else:
-                    st.warning("Please enter shape text.")
+                if st.form_submit_button("➕ Add Step", use_container_width=True):
+                    if step_text.strip():
+                        cf = str(int(connect_from.strip())-1) if connect_from.strip().isdigit() else ""
+                        lt = str(int(loop_to.strip())-1)     if loop_to.strip().isdigit()     else ""
+                        st.session_state.steps.append({
+                            "shape": SHAPE_TYPES[shape_label], "text": step_text,
+                            "column": col_choice, "input_label": input_label,
+                            "output_label": output_label, "responsible": responsible,
+                            "doc_format": doc_format, "measurement": measurement,
+                            "yes_label": yes_label, "no_label": no_label,
+                            "connect_from": cf, "connect_side": connect_side,
+                            "arrow_label": arrow_label, "loop_to": lt, "loop_label": loop_label,
+                        })
+                        st.success(f"✅ Step {n_steps+1} added: [{shape_label}] {step_text}")
+                        st.rerun()
+                    else:
+                        st.warning("Please enter shape text.")
 
+        # ── Step list ──────────────────────────────────────────────────────────
         st.divider()
         n = len(st.session_state.steps)
         if n:
-            st.subheader(f"Steps ({n})")
+            st.subheader(f"Steps ({n})  — click to edit or reorder")
             reverse_map = {v: k for k, v in SHAPE_TYPES.items()}
             for i, step in enumerate(st.session_state.steps):
-                label = reverse_map.get(step["shape"], step["shape"])
+                label   = reverse_map.get(step["shape"], step["shape"])
                 col_tag = "🔵 left" if step.get("column","left")=="left" else "🟢 right"
                 cf_raw  = step.get("connect_from","")
                 cf_disp = str(int(cf_raw)+1) if str(cf_raw).isdigit() else "auto"
+                lt_raw  = step.get("loop_to","")
+                lt_disp = str(int(lt_raw)+1) if str(lt_raw).isdigit() else "—"
                 with st.expander(f"**Step {i+1}** {col_tag} › [{label}]  {step['text']}", expanded=False):
                     new_text = st.text_input("Edit text", value=step["text"], key=f"edit_{i}")
                     if new_text != step["text"]:
@@ -809,150 +861,48 @@ with tab2:
                     nr = e1.text_input("Responsible", value=step.get("responsible",""), key=f"resp_{i}")
                     nd = e2.text_input("Doc Format",  value=step.get("doc_format",""),  key=f"doc_{i}")
                     nm = e3.text_input("Measurement", value=step.get("measurement",""), key=f"meas_{i}")
-                    if nr != step.get("responsible",""): st.session_state.steps[i]["responsible"] = nr; st.rerun()
-                    if nd != step.get("doc_format",""):  st.session_state.steps[i]["doc_format"]  = nd; st.rerun()
-                    if nm != step.get("measurement",""): st.session_state.steps[i]["measurement"] = nm; st.rerun()
-
-                    # AI Improve button
-                    if st.button("✨ Gemini: improve this step text", key=f"improve_{i}"):
-                        with st.spinner("Gemini improving..."):
-                            improved = gemini_improve_step(step["text"])
-                        if not improved.startswith("❌") and not improved.startswith("⚠️"):
-                            st.session_state.steps[i]["text"] = improved
-                            st.success(f"Improved: {improved}")
-                            st.rerun()
-                        else:
-                            st.error(improved)
-
+                    if nr != step.get("responsible",""): st.session_state.steps[i]["responsible"]=nr; st.rerun()
+                    if nd != step.get("doc_format",""):  st.session_state.steps[i]["doc_format"]=nd;  st.rerun()
+                    if nm != step.get("measurement",""): st.session_state.steps[i]["measurement"]=nm; st.rerun()
                     bc1, bc2, bc3, _ = st.columns([1,1,1,4])
-                    if bc1.button("⬆️", key=f"up_{i}"):
+                    if bc1.button("⬆️ Up",     key=f"up_{i}"):
                         if i>0:
                             st.session_state.steps[i], st.session_state.steps[i-1] = \
                                 st.session_state.steps[i-1], st.session_state.steps[i]
                         st.rerun()
-                    if bc2.button("⬇️", key=f"dn_{i}"):
+                    if bc2.button("⬇️ Down",   key=f"dn_{i}"):
                         if i<len(st.session_state.steps)-1:
                             st.session_state.steps[i], st.session_state.steps[i+1] = \
                                 st.session_state.steps[i+1], st.session_state.steps[i]
                         st.rerun()
                     if bc3.button("🗑️ Delete", key=f"del_{i}"):
                         st.session_state.steps.pop(i); st.rerun()
-                    st.caption(f"Connect from: step {cf_disp}  |  Arrow: {step.get('arrow_label') or '—'}")
+                    st.caption(f"Connect from: step {cf_disp}  |  Side: {step.get('connect_side','bottom')}  |  Arrow: {step.get('arrow_label') or '—'}  |  Loop to: {lt_disp}")
         else:
-            st.info("No steps yet. Use the form above or the Gemini AI Tools tab.")
+            if "AI" in mode:
+                st.info("Describe your process above and click **✨ Generate Flowchart with Gemini**.")
+            else:
+                st.info("No steps yet. Use the form above to add process flow steps.")
 
+    # ── Live Preview ───────────────────────────────────────────────────────────
     with preview_col:
         st.subheader("👁️ Live Flowchart Preview")
+        st.caption("Updates automatically as steps change.")
         preview_html = render_preview_html(st.session_state.steps)
         n = len(st.session_state.steps)
         est_h = max(320, min(900, n * 88 + 150)) if n > 0 else 260
         components.html(preview_html, height=est_h, scrolling=False)
+        if st.session_state.steps:
+            st.markdown("---")
+            st.markdown("**Shape colour guide:**")
+            guide_cols = st.columns(4)
+            for gc, (icon, name, desc) in zip(guide_cols, [
+                ("🟦","Rectangle","Process step"),("⬛","Oval","Start / End"),
+                ("🟨","Diamond","Decision"),("🟩","Parallelogram","Input / Output")]):
+                gc.markdown(f"{icon} **{name}**  \n{desc}")
 
-# ── TAB 3 — Gemini AI Tools ────────────────────────────────────────────────────
+# ── TAB 3 ──────────────────────────────────────────────────────────────────────
 with tab3:
-    st.subheader("🤖 Gemini AI Tools")
-    st.caption("All features use **Gemini 2.0 Flash** — free tier, no credit card required.")
-
-    if not st.session_state.gemini_api_key:
-        st.warning("⚠️ Enter your Gemini API key in the sidebar to use AI features.")
-        st.markdown("**Get your free key:** [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)")
-    else:
-        # ── Feature 1: Generate full SOP
-        st.markdown("### 1️⃣ Generate Complete SOP from Description")
-        with st.form("gen_sop_form"):
-            sop_desc = st.text_area(
-                "Describe your process",
-                placeholder="e.g. Generate a 7-step SOP for receiving goods in a warehouse: unloading, inspection, GRN creation, quality check, putaway, system update, and closure.",
-                height=100,
-            )
-            gen_col1, gen_col2 = st.columns(2)
-            with gen_col1:
-                replace_existing = st.checkbox("Replace existing steps", value=False)
-            if st.form_submit_button("✨ Generate SOP Steps with Gemini", use_container_width=True):
-                if sop_desc.strip():
-                    with st.spinner("Gemini is generating your SOP steps..."):
-                        new_steps = gemini_generate_full_sop(sop_desc)
-                    if new_steps:
-                        if replace_existing:
-                            st.session_state.steps = []
-                        for s in new_steps:
-                            s.setdefault("column", "left")
-                            s.setdefault("connect_from", "")
-                            s.setdefault("connect_side", "bottom (default)")
-                            s.setdefault("loop_to", "")
-                            s.setdefault("loop_label", "")
-                            s.setdefault("yes_label", "YES")
-                            s.setdefault("no_label", "NO")
-                            st.session_state.steps.append(s)
-                        st.success(f"✅ {len(new_steps)} steps generated and added!")
-                        st.rerun()
-                    else:
-                        st.error("Could not parse Gemini response. Try rephrasing.")
-                else:
-                    st.warning("Please enter a description.")
-
-        st.divider()
-
-        # ── Feature 2: Suggest next step
-        st.markdown("### 2️⃣ Suggest Next Step")
-        st.caption("Gemini looks at your current steps and proposes the most logical next one.")
-        if st.button("🔮 Suggest Next Step", use_container_width=True):
-            with st.spinner("Gemini thinking..."):
-                suggestion = gemini_suggest_next_step()
-            if suggestion and suggestion.get("text"):
-                suggestion.setdefault("column", "left")
-                suggestion.setdefault("connect_from", "")
-                suggestion.setdefault("connect_side", "bottom (default)")
-                suggestion.setdefault("loop_to", "")
-                suggestion.setdefault("loop_label", "")
-                suggestion.setdefault("yes_label", "YES")
-                suggestion.setdefault("no_label", "NO")
-                st.session_state.steps.append(suggestion)
-                st.success(f"✅ Added: [{suggestion.get('shape','rect')}] {suggestion.get('text','')}")
-                st.rerun()
-            else:
-                st.error("Could not generate suggestion.")
-
-        st.divider()
-
-        # ── Feature 3: Analyze flow
-        st.markdown("### 3️⃣ Analyze & Improve Flow")
-        st.caption("Gemini reviews all your steps and identifies gaps, missing steps, and inefficiencies.")
-        if st.button("🔍 Analyze SOP Flow", use_container_width=True):
-            if not st.session_state.steps:
-                st.warning("Add at least one step first.")
-            else:
-                with st.spinner("Gemini analyzing your process flow..."):
-                    analysis = gemini_analyze_flow()
-                st.markdown("**Gemini's Analysis:**")
-                st.info(analysis)
-
-        st.divider()
-
-        # ── Feature 4: AI Chat
-        st.markdown("### 4️⃣ Chat with Gemini about your SOP")
-        chat_container = st.container()
-        with chat_container:
-            for msg in st.session_state.ai_chat_history:
-                role_icon = "🧑" if msg["role"] == "user" else "🤖"
-                with st.chat_message(msg["role"]):
-                    st.write(f"{role_icon} {msg['content']}")
-
-        user_q = st.chat_input("Ask Gemini anything about your SOP...")
-        if user_q:
-            st.session_state.ai_chat_history.append({"role": "user", "content": user_q})
-            with st.spinner("Gemini responding..."):
-                reply = gemini_chat(user_q)
-            st.session_state.ai_chat_history.append({"role": "assistant", "content": reply})
-            st.rerun()
-
-        if st.session_state.ai_chat_history:
-            if st.button("🗑️ Clear chat history"):
-                st.session_state.ai_chat_history = []
-                st.rerun()
-
-# ── TAB 4 ──────────────────────────────────────────────────────────────────────
-with tab4:
     st.subheader("SOP Change Record")
     with st.form("cr_form", clear_on_submit=True):
         r1c1,r1c2,r1c3,r1c4 = st.columns(4)
@@ -978,45 +928,22 @@ with tab4:
         if cc2.button("🗑️", key=f"crdel_{i}"):
             st.session_state.change_records.pop(i); st.rerun()
 
-# ── TAB 5 ──────────────────────────────────────────────────────────────────────
-with tab5:
-    st.subheader("Export SOP")
+# ── TAB 4 ──────────────────────────────────────────────────────────────────────
+with tab4:
+    st.subheader("Generate & Download PDF")
     if not st.session_state.steps:
-        st.warning("⚠️ Add at least one process step before exporting.")
+        st.warning("⚠️ Add at least one process step before generating the PDF.")
     else:
         st.success(f"Ready — **{len(st.session_state.steps)} step(s)** will be included.")
-        col_json, col_pdf = st.columns(2)
-
-        with col_json:
-            st.markdown("#### 📦 Export as JSON")
-            sop_data   = build_sop_json()
-            json_bytes = json.dumps(sop_data, indent=2, ensure_ascii=False).encode("utf-8")
-            safe_name  = st.session_state.sop_no.replace("/", "-")
-            st.download_button(
-                label="📥 Download SOP JSON",
-                data=json_bytes,
-                file_name=f"SOP_{safe_name}.json",
-                mime="application/json",
-                use_container_width=True,
-            )
-            with st.expander("Preview JSON"):
-                st.json(sop_data)
-
-        with col_pdf:
-            st.markdown("#### 📄 Export as PDF")
-            meta = {k: st.session_state[k] for k in [
-                "company_name","title","sop_no","rev_no","date","page_info",
-                "unit","area","sub_area","zone","owner","purpose","scope",
-                "composed_by","change_records"]}
-            pdf_buf = generate_pdf(st.session_state.steps, meta)
-            st.download_button(
-                label="📥 Download SOP PDF",
-                data=pdf_buf,
-                file_name=f"SOP_{safe_name}.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-            )
-
+        meta = {k: st.session_state[k] for k in [
+            "company_name","title","sop_no","rev_no","date","page_info",
+            "unit","area","sub_area","zone","owner","purpose","scope",
+            "composed_by","change_records"]}
+        pdf_buf = generate_pdf(st.session_state.steps, meta)
+        st.download_button(
+            label="📥 Download SOP PDF", data=pdf_buf,
+            file_name="SOP_Document.pdf", mime="application/pdf",
+            use_container_width=True)
         st.divider()
         st.subheader("Step Summary")
         reverse_map = {v:k for k,v in SHAPE_TYPES.items()}
@@ -1024,7 +951,8 @@ with tab5:
             "Step": i+1, "Col": s.get("column","left"),
             "Shape": reverse_map.get(s["shape"], s["shape"]),
             "Text": s["text"],
-            "Arrow": s.get("arrow_label",""),
-            "Responsible": s.get("responsible",""),
+            "Connect from": str(int(s.get("connect_from",""))+1) if str(s.get("connect_from","")).isdigit() else "auto",
+            "Arrow label": s.get("arrow_label",""),
+            "Loop to": str(int(s.get("loop_to",""))+1) if str(s.get("loop_to","")).isdigit() else "—",
         } for i,s in enumerate(st.session_state.steps)]
         st.dataframe(rows, use_container_width=True, hide_index=True)
