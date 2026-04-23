@@ -100,6 +100,31 @@ EXAMPLES = [
     "Raw material arrives → Inspect quality → If pass (YES): Move to production → Manufacture product → Final QC check → If QC pass (YES): Pack and label → Dispatch → End. If QC fail (NO): Rework or scrap",
 ]
 
+# ─── Helper: sanitize a single step's string fields ───────────────────────────
+def sanitize_step(step):
+    """Replace None with '' for all string fields that may come back as null from AI."""
+    str_fields = [
+        "arrow_label", "loop_label", "input_label", "output_label",
+        "responsible", "doc_format", "measurement", "yes_label", "no_label",
+        "connect_side", "column", "text",
+    ]
+    for f in str_fields:
+        if step.get(f) is None:
+            step[f] = ""
+    # Ensure connect_from and loop_to are strings (not None/int)
+    step["connect_from"] = str(step["connect_from"]) if step.get("connect_from") is not None else ""
+    step["loop_to"]      = str(step["loop_to"])      if step.get("loop_to")      is not None else ""
+    # Restore defaults for fields that must not be empty
+    if not step.get("yes_label"):
+        step["yes_label"] = "YES"
+    if not step.get("no_label"):
+        step["no_label"] = "NO"
+    if not step.get("connect_side"):
+        step["connect_side"] = "bottom (default)"
+    if not step.get("column"):
+        step["column"] = "left"
+    return step
+
 # ─── AI Generator (Google Gemini) ─────────────────────────────────────────────
 def generate_steps_with_ai(description: str):
     import time
@@ -127,7 +152,7 @@ def generate_steps_with_ai(description: str):
                         system_instruction=AI_SYSTEM_PROMPT,
                     ),
                 )
-                break  # success
+                break
             except Exception as e:
                 last_error = e
                 err_str = str(e)
@@ -137,20 +162,20 @@ def generate_steps_with_ai(description: str):
                     st.warning(f"\u23f3 {model_name} is busy (attempt {attempt+1}/{max_retries}). Retrying in {wait}s...")
                     time.sleep(wait)
                 else:
-                    break  # move to next model
+                    break
         if response is not None:
-            break  # got a response, stop trying models
+            break
     if response is None:
         raise last_error
+
     raw = response.text.strip()
-    # Strip any accidental markdown fences
     raw = raw.replace("```json", "").replace("```", "").strip()
 
     parsed = json.loads(raw)
     if not isinstance(parsed, list):
         raise ValueError("AI returned non-list JSON")
 
-    # Normalise every step
+    # Normalise & sanitize every step
     for step in parsed:
         step.setdefault("input_label", "")
         step.setdefault("output_label", "")
@@ -165,8 +190,8 @@ def generate_steps_with_ai(description: str):
         step.setdefault("loop_to", None)
         step.setdefault("loop_label", "")
         step.setdefault("column", "left")
-        step["connect_from"] = str(step["connect_from"]) if step["connect_from"] is not None else ""
-        step["loop_to"]      = str(step["loop_to"])      if step["loop_to"]      is not None else ""
+        sanitize_step(step)
+
     return parsed
 
 # ─── SVG Preview ──────────────────────────────────────────────────────────────
@@ -246,11 +271,18 @@ def generate_svg_preview(steps):
     arrow_svg = ""
 
     for idx, step in enumerate(steps):
-        a = anchors[idx]; lbl = step.get("arrow_label","").strip()
+        a = anchors[idx]
+        # ── FIX: use "or" to guard against None values ──
+        lbl          = (step.get("arrow_label")  or "").strip()
+        connect_from = (step.get("connect_from") or "")
+        connect_side = (step.get("connect_side") or "bottom (default)")
+        loop_to      = (step.get("loop_to")      or "")
+        loop_label   = (step.get("loop_label")   or "").strip()
+
         lbl_upper = lbl.upper()
         ac = YES_COLOR if lbl_upper=="YES" else (NO_COLOR if lbl_upper=="NO" else ARROW_COLOR)
-        connect_from = step.get("connect_from",""); connect_side = step.get("connect_side","bottom (default)")
-        if connect_from != "" and str(connect_from).isdigit():
+
+        if str(connect_from) != "" and str(connect_from).isdigit():
             src = int(connect_from)
             if 0 <= src < len(anchors):
                 s = anchors[src]
@@ -284,11 +316,12 @@ def generate_svg_preview(steps):
                     ps=anchors[prev]
                     arrow_svg += f'<line x1="{a["cx"]}" y1="{ps["bot"]}" x2="{a["cx"]}" y2="{a["top"]}" stroke="{ARROW_COLOR}" stroke-width="1.5"/>'
                     arrow_svg += f'<path d="{arrowhead_d(a["cx"],a["top"],"down")}" fill="{ARROW_COLOR}"/>'
-        loop_to=step.get("loop_to",""); loop_label=step.get("loop_label","").strip()
-        if loop_to!="" and str(loop_to).isdigit():
+
+        if str(loop_to) != "" and str(loop_to).isdigit():
             lt=int(loop_to)
             if 0<=lt<len(anchors):
-                dest=anchors[lt]; lc=YES_COLOR if loop_label.upper()=="YES" else (NO_COLOR if loop_label.upper()=="NO" else "#1a6dcc")
+                dest=anchors[lt]
+                lc=YES_COLOR if loop_label.upper()=="YES" else (NO_COLOR if loop_label.upper()=="NO" else "#1a6dcc")
                 lx=a["left"]-22
                 arrow_svg += f'<path d="M{a["left"]},{a["cy"]} L{lx},{a["cy"]} L{lx},{dest["cy"]} L{dest["left"]},{dest["cy"]}" fill="none" stroke="{lc}" stroke-width="1.5" stroke-dasharray="4 2" stroke-linejoin="round"/>'
                 arrow_svg += f'<path d="{arrowhead_d(dest["left"],dest["cy"],"right")}" fill="{lc}"/>'
@@ -307,7 +340,9 @@ def generate_svg_preview(steps):
     for idx, step in enumerate(steps):
         a=anchors[idx]; shape=step["shape"]; cx,cy=a["cx"],a["cy"]
         bw,bh=a["bw"],a["bh"]; x0=cx-bw/2; y0=a["top"]
-        clr=COLORS.get(shape,COLORS["rect"]); lines=wrap_label(step["text"])
+        clr=COLORS.get(shape,COLORS["rect"]); lines=wrap_label(step.get("text",""))
+        yes_lbl = (step.get("yes_label") or "YES")
+        no_lbl  = (step.get("no_label")  or "NO")
         shape_svg += '<g>'
         if shape=="rect":
             shape_svg += f'<rect x="{x0}" y="{y0}" width="{bw}" height="{bh}" rx="8" fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
@@ -319,15 +354,14 @@ def generate_svg_preview(steps):
             pts=f"{cx},{y0} {cx+bw/2},{cy} {cx},{y0+bh} {cx-bw/2},{cy}"
             shape_svg += f'<polygon points="{pts}" fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
             shape_svg += text_lines_svg(lines, cx, cy, 10, fill=clr["text"])
-            yes_l=step.get("yes_label","YES") or "YES"; no_l=step.get("no_label","NO") or "NO"
-            shape_svg += f'<text x="{cx+bw/2+6}" y="{cy+4}" font-size="9" font-weight="700" fill="{YES_COLOR}" font-family="\'Segoe UI\',sans-serif">{esc(yes_l)} →</text>'
-            shape_svg += f'<text x="{cx-bw/2-6}" y="{cy+4}" font-size="9" font-weight="700" text-anchor="end" fill="{NO_COLOR}" font-family="\'Segoe UI\',sans-serif">← {esc(no_l)}</text>'
+            shape_svg += f'<text x="{cx+bw/2+6}" y="{cy+4}" font-size="9" font-weight="700" fill="{YES_COLOR}" font-family="\'Segoe UI\',sans-serif">{esc(yes_lbl)} →</text>'
+            shape_svg += f'<text x="{cx-bw/2-6}" y="{cy+4}" font-size="9" font-weight="700" text-anchor="end" fill="{NO_COLOR}" font-family="\'Segoe UI\',sans-serif">← {esc(no_lbl)}</text>'
         elif shape=="parallelogram":
             skew=10; pts=f"{x0+skew},{y0} {x0+bw},{y0} {x0+bw-skew},{y0+bh} {x0},{y0+bh}"
             shape_svg += f'<polygon points="{pts}" fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
             shape_svg += text_lines_svg(lines, cx, cy, 11, fill=clr["text"])
         elif shape=="arrow_text":
-            shape_svg += f'<text x="{cx}" y="{cy+4}" text-anchor="middle" font-size="11" fill="{clr["text"]}" font-style="italic" font-family="\'Segoe UI\',sans-serif">{esc(step["text"])}</text>'
+            shape_svg += f'<text x="{cx}" y="{cy+4}" text-anchor="middle" font-size="11" fill="{clr["text"]}" font-style="italic" font-family="\'Segoe UI\',sans-serif">{esc(step.get("text",""))}</text>'
         shape_svg += f'<circle cx="{x0+12}" cy="{y0+12}" r="9" fill="{clr["stroke"]}" opacity="0.9"/>'
         shape_svg += f'<text x="{x0+12}" y="{y0+16}" text-anchor="middle" font-size="9" font-weight="700" fill="white" font-family="\'Segoe UI\',sans-serif">{idx+1}</text>'
         shape_svg += '</g>'
@@ -579,7 +613,7 @@ def generate_pdf(steps, meta):
         rg=row_geom[pi]; ry,ROW_H=rg["ry"],rg["ROW_H"]
         ref_idx=pair["left"] if pair["left"] is not None else pair["right"]; step=steps[ref_idx]
         for col_i,key in [(0,"input_label"),(2,"output_label"),(3,"responsible"),(4,"doc_format"),(5,"measurement")]:
-            txt=step.get(key,"")
+            txt=(step.get(key) or "")
             if txt:
                 cw=XS[col_i+1]-XS[col_i]
                 draw_centered_text(c, txt, XS[col_i]+cw/2, ry+ROW_H/2, cw-4, font_size=6.5)
@@ -594,11 +628,16 @@ def generate_pdf(steps, meta):
     GREEN=colors.HexColor("#006600"); RED=colors.HexColor("#CC0000"); BLUE=colors.HexColor("#1a6dcc")
     for idx,step in enumerate(steps):
         a=anchors[idx]; col=a["col"]
-        connect_from=step.get("connect_from",""); arrow_label=step.get("arrow_label","").strip()
-        connect_side=step.get("connect_side","bottom (default)")
+        # ── FIX: guard all string fields against None ──
+        connect_from  = (step.get("connect_from")  or "")
+        arrow_label   = (step.get("arrow_label")   or "").strip()
+        connect_side  = (step.get("connect_side")  or "bottom (default)")
+        loop_to       = (step.get("loop_to")       or "")
+        loop_label    = (step.get("loop_label")    or "").strip()
+
         arr_color=GREEN if arrow_label.upper()=="YES" else (RED if arrow_label.upper()=="NO" else colors.black)
         lbl_color=arr_color
-        if connect_from!="" and str(connect_from).isdigit():
+        if str(connect_from)!="" and str(connect_from).isdigit():
             src_idx=int(connect_from)
             if 0<=src_idx<len(anchors):
                 s=anchors[src_idx]
@@ -621,8 +660,7 @@ def generate_pdf(steps, meta):
                     if anchors[pi]["col"]==col: prev_same=pi; break
                 if prev_same is not None:
                     ps=anchors[prev_same]; draw_arrow_down(c, a["cx"], ps["bot"], a["top"])
-        loop_to=step.get("loop_to",""); loop_label=step.get("loop_label","").strip()
-        if loop_to!="" and str(loop_to).isdigit():
+        if str(loop_to)!="" and str(loop_to).isdigit():
             lt_idx=int(loop_to)
             if 0<=lt_idx<len(anchors):
                 dest=anchors[lt_idx]
@@ -637,19 +675,21 @@ def generate_pdf(steps, meta):
                 c.setStrokeColor(colors.black)
     for idx,step in enumerate(steps):
         a=anchors[idx]; sh_x,sh_bot=a["sh_x"],a["sh_bot"]; sh_w,sh_h=a["sh_w"],a["sh_h"]; shape=step["shape"]
-        if shape=="rect":            draw_rect_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
-        elif shape=="oval":          draw_oval_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
+        txt = (step.get("text") or "")
+        yes_lbl = (step.get("yes_label") or "YES")
+        no_lbl  = (step.get("no_label")  or "NO")
+        if shape=="rect":            draw_rect_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
+        elif shape=="oval":          draw_oval_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
         elif shape=="diamond":
-            draw_diamond_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
-            yes_lbl=step.get("yes_label","YES") or "YES"; no_lbl=step.get("no_label","NO") or "NO"
+            draw_diamond_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
             c.setFont("Helvetica-Bold",6.5); c.setFillColor(GREEN)
             c.drawString(sh_x+sh_w+3, a["cy"]-3, f"{yes_lbl} →")
             no_w=c.stringWidth(f"← {no_lbl}","Helvetica-Bold",6.5)
             c.setFillColor(RED); c.drawString(sh_x-no_w-3, a["cy"]-3, f"← {no_lbl}"); c.setFillColor(colors.black)
-        elif shape=="parallelogram": draw_parallelogram_shape(c, sh_x, sh_bot, sh_w, sh_h, step["text"])
+        elif shape=="parallelogram": draw_parallelogram_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
         elif shape=="arrow_text":
             c.setFont("Helvetica-Oblique",7); c.setFillColor(colors.HexColor("#333333"))
-            c.drawCentredString(a["cx"], a["cy"], step["text"]); c.setFillColor(colors.black)
+            c.drawCentredString(a["cx"], a["cy"], txt); c.setFillColor(colors.black)
     cur_y=table_bottom; cur_y-=4*mm; CR_TITLE_H=6*mm
     c.setFillColor(colors.HexColor("#DDEEFF")); c.rect(ML,cur_y-CR_TITLE_H,TW,CR_TITLE_H,fill=1,stroke=1)
     c.setFont("Helvetica-Bold",8); c.setFillColor(colors.black)
@@ -876,18 +916,18 @@ with tab2:
             for i, step in enumerate(st.session_state.steps):
                 label   = reverse_map.get(step["shape"], step["shape"])
                 col_tag = "🔵 left" if step.get("column","left")=="left" else "🟢 right"
-                cf_raw  = step.get("connect_from","")
+                cf_raw  = (step.get("connect_from") or "")
                 cf_disp = str(int(cf_raw)+1) if str(cf_raw).isdigit() else "auto"
-                lt_raw  = step.get("loop_to","")
+                lt_raw  = (step.get("loop_to") or "")
                 lt_disp = str(int(lt_raw)+1) if str(lt_raw).isdigit() else "—"
-                with st.expander(f"**Step {i+1}** {col_tag} › [{label}]  {step['text']}", expanded=False):
-                    new_text = st.text_input("Edit text", value=step["text"], key=f"edit_{i}")
-                    if new_text != step["text"]:
+                with st.expander(f"**Step {i+1}** {col_tag} › [{label}]  {step.get('text','')}", expanded=False):
+                    new_text = st.text_input("Edit text", value=(step.get("text") or ""), key=f"edit_{i}")
+                    if new_text != step.get("text",""):
                         st.session_state.steps[i]["text"] = new_text; st.rerun()
                     e1, e2, e3 = st.columns(3)
-                    nr = e1.text_input("Responsible", value=step.get("responsible",""), key=f"resp_{i}")
-                    nd = e2.text_input("Doc Format",  value=step.get("doc_format",""),  key=f"doc_{i}")
-                    nm = e3.text_input("Measurement", value=step.get("measurement",""), key=f"meas_{i}")
+                    nr = e1.text_input("Responsible", value=(step.get("responsible") or ""), key=f"resp_{i}")
+                    nd = e2.text_input("Doc Format",  value=(step.get("doc_format")  or ""), key=f"doc_{i}")
+                    nm = e3.text_input("Measurement", value=(step.get("measurement") or ""), key=f"meas_{i}")
                     if nr != step.get("responsible",""): st.session_state.steps[i]["responsible"]=nr; st.rerun()
                     if nd != step.get("doc_format",""):  st.session_state.steps[i]["doc_format"]=nd;  st.rerun()
                     if nm != step.get("measurement",""): st.session_state.steps[i]["measurement"]=nm; st.rerun()
@@ -904,7 +944,9 @@ with tab2:
                         st.rerun()
                     if bc3.button("🗑️ Delete", key=f"del_{i}"):
                         st.session_state.steps.pop(i); st.rerun()
-                    st.caption(f"Connect from: step {cf_disp}  |  Side: {step.get('connect_side','bottom')}  |  Arrow: {step.get('arrow_label') or '—'}  |  Loop to: {lt_disp}")
+                    side_val = (step.get("connect_side") or "bottom")
+                    arrow_val = (step.get("arrow_label") or "—")
+                    st.caption(f"Connect from: step {cf_disp}  |  Side: {side_val}  |  Arrow: {arrow_val}  |  Loop to: {lt_disp}")
         else:
             if "AI" in mode:
                 st.info("Describe your process above and click **✨ Generate Flowchart with Gemini**.")
@@ -977,9 +1019,9 @@ with tab4:
         rows = [{
             "Step": i+1, "Col": s.get("column","left"),
             "Shape": reverse_map.get(s["shape"], s["shape"]),
-            "Text": s["text"],
+            "Text": (s.get("text") or ""),
             "Connect from": str(int(s.get("connect_from",""))+1) if str(s.get("connect_from","")).isdigit() else "auto",
-            "Arrow label": s.get("arrow_label",""),
+            "Arrow label": (s.get("arrow_label") or ""),
             "Loop to": str(int(s.get("loop_to",""))+1) if str(s.get("loop_to","")).isdigit() else "—",
         } for i,s in enumerate(st.session_state.steps)]
         st.dataframe(rows, use_container_width=True, hide_index=True)
