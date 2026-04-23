@@ -111,28 +111,37 @@ def generate_steps_with_ai(description: str):
     client = genai.Client(api_key=api_key)
     prompt = f"Convert this process into SOP flowchart steps:\n\n{description}"
 
-    max_retries = 4
-    wait_seconds = [5, 10, 20, 30]
+    models_to_try = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.0-flash"]
+    max_retries = 5
+    wait_seconds = [5, 10, 20, 30, 45]
     response = None
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=AI_SYSTEM_PROMPT,
-                ),
-            )
-            break
-        except Exception as e:
-            err_str = str(e)
-            is_retryable = any(x in err_str for x in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"])
-            if is_retryable and attempt < max_retries - 1:
-                wait = wait_seconds[attempt]
-                st.warning(f"\u23f3 Gemini is busy (attempt {attempt+1}/{max_retries}). Retrying in {wait}s...")
-                time.sleep(wait)
-            else:
-                raise
+    last_error = None
+
+    for model_name in models_to_try:
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=AI_SYSTEM_PROMPT,
+                    ),
+                )
+                break  # success
+            except Exception as e:
+                last_error = e
+                err_str = str(e)
+                is_retryable = any(x in err_str for x in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"])
+                if is_retryable and attempt < max_retries - 1:
+                    wait = wait_seconds[attempt]
+                    st.warning(f"\u23f3 {model_name} is busy (attempt {attempt+1}/{max_retries}). Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    break  # move to next model
+        if response is not None:
+            break  # got a response, stop trying models
+    if response is None:
+        raise last_error
     raw = response.text.strip()
     # Strip any accidental markdown fences
     raw = raw.replace("```json", "").replace("```", "").strip()
