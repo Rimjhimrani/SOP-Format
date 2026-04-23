@@ -2,7 +2,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 import io
 import json
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
@@ -106,16 +107,16 @@ def generate_steps_with_ai(description: str):
         st.error("⚠️ Google Gemini API key not found. Please enter your API key in the sidebar.")
         return None
 
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction=AI_SYSTEM_PROMPT,
-    )
-
+    client = genai.Client(api_key=api_key)
     prompt = f"Convert this process into SOP flowchart steps:\n\n{description}"
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=AI_SYSTEM_PROMPT,
+        ),
+    )
     raw = response.text.strip()
-
     # Strip any accidental markdown fences
     raw = raw.replace("```json", "").replace("```", "").strip()
 
