@@ -110,7 +110,7 @@ def generate_steps_with_ai(description: str):
     client = genai.Client(api_key=api_key)
     prompt = f"Convert this process into SOP flowchart steps:\n\n{description}"
     response = client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         contents=prompt,
         config=types.GenerateContentConfig(
             system_instruction=AI_SYSTEM_PROMPT,
