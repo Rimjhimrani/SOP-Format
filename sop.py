@@ -2,8 +2,6 @@ import streamlit as st
 import streamlit.components.v1 as components
 import io
 import json
-import os
-import anthropic
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
@@ -11,7 +9,7 @@ from reportlab.lib.units import mm
 
 st.set_page_config(page_title="SOP Builder", layout="wide")
 
-# ─── Session State ────────────────────────────────────────────────────────────
+# ─── Session State ─────────────────────────────────────────────────────────────
 defaults = {
     "steps": [],
     "sop_no": "SCM/STR/LS/02",
@@ -28,16 +26,10 @@ defaults = {
     "owner": "Stores Manager",
     "company_name": "PINNACLE MOBILITY",
     "composed_by": "Agilomatrix Pvt Ltd (connectus@agilomatrix.com)",
-    "ai_description": "",
-    "ai_mode": "AI Generate",
-    "anthropic_api_key": "",
     "change_records": [
         {"sno": "1", "date": "17-12-2024", "rev": "0.0", "desc": "Original Version",
          "change_letter": "NA", "prepared": "Prince S", "reviewed": "Ajay G", "approved": "Vilas B"},
     ],
-    # Decision Engine state
-    "de_input": "",
-    "de_result": None,
 }
 for k, v in defaults.items():
     if k not in st.session_state:
@@ -53,157 +45,7 @@ SHAPE_TYPES = {
 COLUMN_OPTIONS       = ["left", "right"]
 CONNECT_SIDE_OPTIONS = ["bottom (default)", "right side →", "left side ←"]
 
-# ─── Anthropic client helper ──────────────────────────────────────────────────
-def get_client():
-    key = st.session_state.get("anthropic_api_key", "").strip()
-    if not key:
-        st.error("⚠️ Anthropic API key not found. Please enter your API key in the sidebar.")
-        return None
-    return anthropic.Anthropic(api_key=key)
-
-# ─── Sidebar: API key ─────────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("### 🔑 API Configuration")
-    api_key_input = st.text_input(
-        "Anthropic API Key",
-        value=st.session_state.anthropic_api_key,
-        type="password",
-        placeholder="sk-ant-...",
-        help="Your Anthropic API key. Get one at console.anthropic.com"
-    )
-    if api_key_input != st.session_state.anthropic_api_key:
-        st.session_state.anthropic_api_key = api_key_input
-    if st.session_state.anthropic_api_key:
-        st.success("✅ API key set")
-    st.divider()
-    st.caption("Powered by Claude (Anthropic)")
-
-# ─── SOP Flow AI prompt ───────────────────────────────────────────────────────
-SOP_SYSTEM_PROMPT = """You are an expert SOP (Standard Operating Procedure) process flow designer.
-Convert the user's plain-English process description into a JSON array of flowchart steps.
-
-Shape rules:
-- "oval"          → Start / End terminators ONLY
-- "rect"          → Regular process/action steps
-- "diamond"       → Decisions or checks (has yes/no branches)
-- "parallelogram" → Inputs or outputs (receiving, generating, sending)
-- "arrow_text"    → Short annotations only
-
-Column rules:
-- "left"  → main flow
-- "right" → branch (decision outcome that diverges from main path)
-
-Connection rules:
-- "connect_from": 0-based index of the parent step, or null for automatic
-- "connect_side": "bottom (default)" | "right side →" | "left side ←"
-- "arrow_label":  "" | "YES" | "NO" | short label
-- "loop_to":      0-based index to loop back to, or null
-- "loop_label":   label for the loop arrow
-
-Return ONLY valid JSON array with NO markdown, NO explanation, NO backticks.
-Every step must have ALL these keys:
-shape, text, column, connect_from, connect_side, arrow_label,
-loop_to, loop_label, input_label, output_label, responsible,
-doc_format, measurement, yes_label, no_label
-"""
-
-# ─── Decision Engine AI prompt ────────────────────────────────────────────────
-DE_SYSTEM_PROMPT = """You are an expert in process design and decision modelling.
-Convert the given process flow into a structured decision engine.
-
-Return ONLY valid JSON — no markdown, no backticks, no explanation — with this exact structure:
-{
-  "simplified_flow": [
-    {"step_number": 1, "step_name": "string", "description": "string"}
-  ],
-  "decision_logic": [
-    {
-      "step_name": "string",
-      "decisions": [
-        {"condition": "string", "action": "string", "next_step": "string", "type": "YES|NO|AUTO|LOOP"}
-      ]
-    }
-  ],
-  "rule_engine": [
-    {"step": "string", "conditions": {"field": "value"}, "action": "string", "next_step": "string"}
-  ],
-  "insights": ["string"]
-}
-
-Rules:
-- simplified_flow: linear steps only, no branches, only what happens
-- decision_logic: ONLY steps that have conditions/decisions
-- rule_engine: machine-readable rules, one object per decision outcome
-- insights: 4-5 concise, actionable optimisation suggestions
-- Keep step names short (3-5 words max)
-"""
-
-DE_EXAMPLES = [
-    "Start → Receive purchase order → Check stock availability → If stock available (YES): Pick and pack items → Generate invoice → Ship to customer → End. If not available (NO): Raise procurement request → Wait for delivery → loop back to Check stock availability",
-    "Employee raises leave request → Manager reviews → If approved (YES): Update HR system → Notify employee → End. If rejected (NO): Send rejection email with reason → Employee can appeal → loop back to Manager reviews",
-    "Customer submits support ticket → Auto-classify priority → If critical (YES): Assign to senior agent immediately → If resolved in 1hr: close ticket → End. If not resolved: escalate to engineering → Fix deployed → notify customer → close → End. If not critical (NO): Add to queue → Agent picks ticket → Investigate → If resolved: close → End. If not resolved: escalate to tier-2 → resolve → close → End",
-]
-
-SOP_EXAMPLES = [
-    "Start → Receive purchase order → Check stock availability → If stock available (YES): Pick and pack items → Generate invoice → Ship to customer → End. If not available (NO): Raise procurement request → Wait for delivery → loop back to Check stock availability",
-    "Employee raises leave request → Manager reviews → If approved (YES): Update HR system → Notify employee → End. If rejected (NO): Send rejection email with reason → Employee can appeal → Manager reviews appeal → loop back",
-    "Raw material arrives → Inspect quality → If pass (YES): Move to production → Manufacture product → Final QC check → If QC pass (YES): Pack and label → Dispatch → End. If QC fail (NO): Rework or scrap",
-]
-
-# ─── AI: Generate SOP Steps ──────────────────────────────────────────────────
-def generate_steps_with_ai(description: str):
-    client = get_client()
-    if not client:
-        return None
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=2048,
-        system=SOP_SYSTEM_PROMPT,
-        messages=[
-            {"role": "user", "content": f"Convert this process into SOP flowchart steps:\n\n{description}"}
-        ],
-    )
-    raw = message.content[0].text.strip()
-    raw = raw.replace("```json", "").replace("```", "").strip()
-    parsed = json.loads(raw)
-    if not isinstance(parsed, list):
-        raise ValueError("AI returned non-list JSON")
-    for step in parsed:
-        step.setdefault("input_label", "")
-        step.setdefault("output_label", "")
-        step.setdefault("responsible", "")
-        step.setdefault("doc_format", "")
-        step.setdefault("measurement", "")
-        step.setdefault("yes_label", "YES")
-        step.setdefault("no_label", "NO")
-        step.setdefault("connect_from", None)
-        step.setdefault("connect_side", "bottom (default)")
-        step.setdefault("arrow_label", "")
-        step.setdefault("loop_to", None)
-        step.setdefault("loop_label", "")
-        step.setdefault("column", "left")
-        step["connect_from"] = str(step["connect_from"]) if step["connect_from"] is not None else ""
-        step["loop_to"]      = str(step["loop_to"])      if step["loop_to"]      is not None else ""
-    return parsed
-
-# ─── AI: Generate Decision Engine ────────────────────────────────────────────
-def generate_decision_engine(description: str):
-    client = get_client()
-    if not client:
-        return None
-    message = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=3000,
-        system=DE_SYSTEM_PROMPT,
-        messages=[
-            {"role": "user", "content": f"Convert this process:\n\n{description}"}
-        ],
-    )
-    raw = message.content[0].text.strip()
-    raw = raw.replace("```json", "").replace("```", "").strip()
-    return json.loads(raw)
-
-# ─── SVG Preview ──────────────────────────────────────────────────────────────
+# ─── SVG Preview ───────────────────────────────────────────────────────────────
 def generate_svg_preview(steps):
     if not steps:
         return """
@@ -222,7 +64,7 @@ def generate_svg_preview(steps):
     SHAPE_H  = {"rect": 60, "oval": 50, "parallelogram": 60, "diamond": 80, "arrow_text": 30}
     V_GAP = 28; TOP_Y = 40
 
-    paired_rows  = []; step_to_pair = {}
+    paired_rows = []; step_to_pair = {}
     for idx, step in enumerate(steps):
         col = step.get("column", "left")
         if col == "right":
@@ -263,15 +105,14 @@ def generate_svg_preview(steps):
                 cur = w
         if cur: lines.append(cur)
         return lines or [""]
-    def text_lines_svg(lines, cx, mid_y, font_size=11, bold=False, fill="#1a1a1a"):
-        lh = font_size+3; total = len(lines)*lh; y0 = mid_y-total/2+lh*0.75
-        weight = "600" if bold else "400"; out = ""
+    def text_lines_svg(lines, cx, mid_y, font_size=11, fill="#1a1a1a"):
+        lh = font_size+3; total = len(lines)*lh; y0 = mid_y-total/2+lh*0.75; out = ""
         for i, line in enumerate(lines):
-            out += f'<text x="{cx}" y="{y0+i*lh:.1f}" text-anchor="middle" font-size="{font_size}" font-weight="{weight}" fill="{fill}" font-family="\'Segoe UI\',sans-serif">{esc(line)}</text>'
+            out += f'<text x="{cx}" y="{y0+i*lh:.1f}" text-anchor="middle" font-size="{font_size}" fill="{fill}" font-family="\'Segoe UI\',sans-serif">{esc(line)}</text>'
         return out
     def arrowhead_d(tx, ty, direction="down"):
         sz = 5
-        if direction == "down":  return f"M{tx},{ty} L{tx-sz},{ty-sz*1.5} L{tx+sz},{ty-sz*1.5} Z"
+        if direction == "down":   return f"M{tx},{ty} L{tx-sz},{ty-sz*1.5} L{tx+sz},{ty-sz*1.5} Z"
         elif direction == "right": return f"M{tx},{ty} L{tx-sz*1.5},{ty-sz} L{tx-sz*1.5},{ty+sz} Z"
         elif direction == "left":  return f"M{tx},{ty} L{tx+sz*1.5},{ty-sz} L{tx+sz*1.5},{ty+sz} Z"
         else: return f"M{tx},{ty} L{tx-sz},{ty+sz*1.5} L{tx+sz},{ty+sz*1.5} Z"
@@ -342,7 +183,7 @@ def generate_svg_preview(steps):
         a=anchors[idx]; shape=step["shape"]; cx,cy=a["cx"],a["cy"]
         bw,bh=a["bw"],a["bh"]; x0=cx-bw/2; y0=a["top"]
         clr=COLORS.get(shape,COLORS["rect"]); lines=wrap_label(step["text"])
-        shape_svg += f'<g>'
+        shape_svg += '<g>'
         if shape=="rect":
             shape_svg += f'<rect x="{x0}" y="{y0}" width="{bw}" height="{bh}" rx="8" fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
             shape_svg += text_lines_svg(lines, cx, cy, 11, fill=clr["text"])
@@ -394,7 +235,6 @@ def generate_svg_preview(steps):
 
     return f"""
     <svg width="{SVG_W}" height="{SVG_H}" viewBox="0 0 {SVG_W} {SVG_H}" xmlns="http://www.w3.org/2000/svg">
-      <style>.sop-node{{cursor:pointer}}.sop-node:hover{{opacity:0.85}}</style>
       <defs><pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
         <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#F0F4F8" stroke-width="0.5"/></pattern></defs>
       <rect width="{SVG_W}" height="{SVG_H}" fill="#FAFBFC"/>
@@ -443,7 +283,8 @@ def render_preview_html(steps):
     document.getElementById('zoom-label').textContent='100%';}}
 </script></body></html>"""
 
-# ─── PDF Helpers ──────────────────────────────────────────────────────────────
+
+# ─── PDF Helpers ───────────────────────────────────────────────────────────────
 def wrapped_lines(c, text, max_w, font_name, font_size):
     words=str(text).split(); lines=[]; cur=""
     for w in words:
@@ -528,8 +369,6 @@ def generate_pdf(steps, meta):
     HEADER_H=22*mm; left_w=44*mm; right_w=83*mm; centre_w=TW-left_w-right_w
     c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
     c.drawString(ML, cur_y-7, meta["company_name"])
-    c.setFont("Helvetica-Bold",10); c.setFillColor(colors.HexColor("#1a6dcc"))
-    c.drawString(ML, cur_y-18, "eka"); c.setFillColor(colors.black)
     cx_title=ML+left_w+centre_w/2
     c.setFont("Helvetica-Bold",13); c.drawCentredString(cx_title, cur_y-7, "STANDARD OPERATING PROCEDURE")
     c.setFont("Helvetica",8.5); draw_centered_text(c, meta["title"], cx_title, cur_y-18, centre_w-4, font_size=8.5)
@@ -701,44 +540,52 @@ def generate_pdf(steps, meta):
     c.drawCentredString(ML+TW/2, cur_y-5, f"Composed By: {meta['composed_by']}")
     c.save(); buf.seek(0); return buf
 
-# ─── Streamlit UI ─────────────────────────────────────────────────────────────
+
+# ─── JSON Export Helper ────────────────────────────────────────────────────────
+def build_sop_json():
+    return {
+        "header": {
+            "company_name":  st.session_state.company_name,
+            "title":         st.session_state.title,
+            "sop_no":        st.session_state.sop_no,
+            "rev_no":        st.session_state.rev_no,
+            "date":          st.session_state.date,
+            "page_info":     st.session_state.page_info,
+            "unit":          st.session_state.unit,
+            "area":          st.session_state.area,
+            "sub_area":      st.session_state.sub_area,
+            "zone":          st.session_state.zone,
+            "owner":         st.session_state.owner,
+            "purpose":       st.session_state.purpose,
+            "scope":         st.session_state.scope,
+            "composed_by":   st.session_state.composed_by,
+        },
+        "steps":          st.session_state.steps,
+        "change_records": st.session_state.change_records,
+    }
+
+
+# ─── Streamlit UI ──────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     .block-container { padding-top: 1rem; }
     h1 { font-size: 1.35rem; margin-bottom: 0.2rem; }
     h2 { font-size: 1.05rem; }
     .stButton > button { width: 100%; }
-    .ai-banner {
-        background: linear-gradient(135deg, #EBF4FF, #F0E6FF);
-        border: 1.5px solid #2B6CB0; border-radius: 10px;
-        padding: 12px 16px; margin-bottom: 12px;
-        font-size: 13px; color: #1A365D;
-    }
-    .de-banner {
-        background: linear-gradient(135deg, #F0FFF4, #EBF4FF);
-        border: 1.5px solid #276749; border-radius: 10px;
-        padding: 12px 16px; margin-bottom: 12px;
-        font-size: 13px; color: #1C4532;
-    }
-    .badge-yes  { background:#C6F6D5; color:#276749; border-radius:12px; padding:2px 8px; font-size:11px; font-weight:600; }
-    .badge-no   { background:#FED7D7; color:#C53030; border-radius:12px; padding:2px 8px; font-size:11px; font-weight:600; }
-    .badge-auto { background:#BEE3F8; color:#2B6CB0; border-radius:12px; padding:2px 8px; font-size:11px; font-weight:600; }
-    .badge-loop { background:#FEFCBF; color:#B7791F; border-radius:12px; padding:2px 8px; font-size:11px; font-weight:600; }
 </style>
 """, unsafe_allow_html=True)
 
 st.title("📋 SOP Builder — Standard Operating Procedure")
-st.caption("Fill in the details, build your process flow, then download as PDF.")
+st.caption("Fill in the details, build your process flow manually, then export as JSON or PDF.")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "🏷️ Header Info",
-    "🤖 Process Flow",
-    "⚙️ Decision Engine",
+    "🔷 Process Flow",
     "📝 Change Record",
-    "📄 Download PDF",
+    "📄 Export",
 ])
 
-# ── TAB 1: Header ─────────────────────────────────────────────────────────────
+# ── TAB 1: Header ──────────────────────────────────────────────────────────────
 with tab1:
     st.subheader("Document Header Fields")
     c1, c2, c3 = st.columns(3)
@@ -762,83 +609,13 @@ with tab1:
     st.session_state.purpose = st.text_input("Purpose", st.session_state.purpose)
     st.session_state.scope   = st.text_area("Scope",    st.session_state.scope, height=80)
 
-# ── TAB 2: Process Flow ───────────────────────────────────────────────────────
+# ── TAB 2: Process Flow ────────────────────────────────────────────────────────
 with tab2:
-    st.markdown("""
-    <div class="ai-banner">
-        🤖 <b>AI-Powered Flow Builder</b> — Describe your process in plain English and let AI generate
-        the full flowchart structure automatically. Or switch to Manual mode to add steps one by one.
-    </div>
-    """, unsafe_allow_html=True)
-
-    mode_col, _ = st.columns([2, 5])
-    with mode_col:
-        mode = st.radio("Input mode", ["🤖 AI Generate", "✏️ Manual"], horizontal=True,
-                        label_visibility="collapsed")
-    st.session_state.ai_mode = mode
-
     input_col, preview_col = st.columns([1, 1], gap="large")
 
     with input_col:
-        if "AI" in mode:
-            st.subheader("✍️ Describe Your Process")
-            st.caption("Write naturally — mention decisions (YES/NO), branches, loops, and who does what.")
-            st.markdown("**Quick examples:**")
-            ex_cols = st.columns(3)
-            example_labels = ["📦 Procurement", "🏖️ Leave Approval", "🏭 Manufacturing QC"]
-            for i, (ec, el) in enumerate(zip(ex_cols, example_labels)):
-                if ec.button(el, key=f"ex_{i}"):
-                    st.session_state.ai_description = SOP_EXAMPLES[i]
-                    st.rerun()
-
-            description = st.text_area(
-                "Process description",
-                value=st.session_state.ai_description,
-                height=200,
-                placeholder="e.g.  Start → Receive goods → Inspect quality → If OK: update stock → notify manager → End. If fail: return to supplier.",
-                label_visibility="collapsed",
-                key="ai_desc_input",
-            )
-            st.session_state.ai_description = description
-
-            gen_col, clr_col = st.columns([3, 1])
-            with gen_col:
-                generate_btn = st.button("✨ Generate Flowchart with AI", type="primary", use_container_width=True)
-            with clr_col:
-                if st.button("🗑️ Clear", use_container_width=True):
-                    st.session_state.steps = []
-                    st.session_state.ai_description = ""
-                    st.rerun()
-
-            if generate_btn:
-                if not description.strip():
-                    st.warning("Please describe your process first.")
-                else:
-                    with st.spinner("🤖 Claude is reading your process and building the flowchart…"):
-                        try:
-                            result = generate_steps_with_ai(description)
-                            if result:
-                                st.session_state.steps = result
-                                st.success(f"✅ Generated {len(result)} steps! See the live preview →")
-                                st.rerun()
-                        except json.JSONDecodeError:
-                            st.error("⚠️ AI returned unexpected output. Try rephrasing your description.")
-                        except Exception as e:
-                            st.error(f"⚠️ Error: {e}")
-
-            with st.expander("💡 Tips for best results", expanded=False):
-                st.markdown("""
-- **Use arrows** `→` to indicate flow between steps
-- **Say YES/NO** after decisions: *"If approved (YES): … If rejected (NO): …"*
-- **Mention loops**: *"loop back to step X"* or *"go back to inspection"*
-- **Name roles**: *"Manager approves"*, *"Warehouse picks items"* → fills Responsible column
-- **Name documents**: *"Fill Form F-12"* → fills Doc Format column
-- **Short sentences** per step give cleaner shape labels
-                """)
-
-        else:
-            with st.expander("📖 How to build branching flows", expanded=False):
-                st.markdown("""
+        with st.expander("📖 How to build branching flows", expanded=False):
+            st.markdown("""
 **Two columns:** `left` (main flow) and `right` (branch).
 
 | Field | What it does |
@@ -847,65 +624,65 @@ with tab2:
 | **Arrow exits from** | Which side of source shape the arrow leaves |
 | **Arrow label** | Text on arrow (e.g. `YES`, `NO`) |
 | **Loop-back to step #** | Draws a loop arrow back to an earlier step |
-                """)
+            """)
 
-            st.subheader("Add a Process Step")
-            n_steps = len(st.session_state.steps)
+        st.subheader("Add a Process Step")
+        n_steps = len(st.session_state.steps)
 
-            with st.form("add_step_form", clear_on_submit=True):
-                fa, fb = st.columns([2, 3])
-                with fa:
-                    shape_label = st.selectbox("Shape Type", list(SHAPE_TYPES.keys()))
-                    col_choice  = st.selectbox("Column (left = main flow)", COLUMN_OPTIONS)
-                with fb:
-                    step_text = st.text_input("Text inside shape *")
+        with st.form("add_step_form", clear_on_submit=True):
+            fa, fb = st.columns([2, 3])
+            with fa:
+                shape_label = st.selectbox("Shape Type", list(SHAPE_TYPES.keys()))
+                col_choice  = st.selectbox("Column (left = main flow)", COLUMN_OPTIONS)
+            with fb:
+                step_text = st.text_input("Text inside shape *")
 
-                st.markdown("**Side-column data (optional)**")
-                sc1, sc2, sc3 = st.columns(3)
-                with sc1:
-                    input_label  = st.text_input("Input Label")
-                    output_label = st.text_input("Output Label")
-                with sc2:
-                    responsible = st.text_input("Responsible")
-                    doc_format  = st.text_input("Doc. Format / System")
-                with sc3:
-                    measurement = st.text_input("Effective Measurement")
-                    yes_label   = st.text_input("YES label (diamonds)", value="YES")
-                    no_label    = st.text_input("NO label (diamonds)",  value="NO")
+            st.markdown("**Side-column data (optional)**")
+            sc1, sc2, sc3 = st.columns(3)
+            with sc1:
+                input_label  = st.text_input("Input Label")
+                output_label = st.text_input("Output Label")
+            with sc2:
+                responsible = st.text_input("Responsible")
+                doc_format  = st.text_input("Doc. Format / System")
+            with sc3:
+                measurement = st.text_input("Effective Measurement")
+                yes_label   = st.text_input("YES label (diamonds)", value="YES")
+                no_label    = st.text_input("NO label (diamonds)",  value="NO")
 
-                st.markdown("**Arrow / Connection settings**")
-                ar1, ar2, ar3 = st.columns(3)
-                with ar1:
-                    connect_from = st.text_input("Connect from step # (blank = auto)")
-                    connect_side = st.selectbox("Arrow exits source from", CONNECT_SIDE_OPTIONS)
-                with ar2:
-                    arrow_label = st.text_input("Arrow label (e.g. YES / NO / blank)")
-                with ar3:
-                    loop_to    = st.text_input("Loop-back to step # (blank = none)")
-                    loop_label = st.text_input("Loop arrow label")
+            st.markdown("**Arrow / Connection settings**")
+            ar1, ar2, ar3 = st.columns(3)
+            with ar1:
+                connect_from = st.text_input("Connect from step # (blank = auto)")
+                connect_side = st.selectbox("Arrow exits source from", CONNECT_SIDE_OPTIONS)
+            with ar2:
+                arrow_label = st.text_input("Arrow label (e.g. YES / NO / blank)")
+            with ar3:
+                loop_to    = st.text_input("Loop-back to step # (blank = none)")
+                loop_label = st.text_input("Loop arrow label")
 
-                if st.form_submit_button("➕ Add Step", use_container_width=True):
-                    if step_text.strip():
-                        cf = str(int(connect_from.strip())-1) if connect_from.strip().isdigit() else ""
-                        lt = str(int(loop_to.strip())-1)     if loop_to.strip().isdigit()     else ""
-                        st.session_state.steps.append({
-                            "shape": SHAPE_TYPES[shape_label], "text": step_text,
-                            "column": col_choice, "input_label": input_label,
-                            "output_label": output_label, "responsible": responsible,
-                            "doc_format": doc_format, "measurement": measurement,
-                            "yes_label": yes_label, "no_label": no_label,
-                            "connect_from": cf, "connect_side": connect_side,
-                            "arrow_label": arrow_label, "loop_to": lt, "loop_label": loop_label,
-                        })
-                        st.success(f"✅ Step {n_steps+1} added: [{shape_label}] {step_text}")
-                        st.rerun()
-                    else:
-                        st.warning("Please enter shape text.")
+            if st.form_submit_button("➕ Add Step", use_container_width=True):
+                if step_text.strip():
+                    cf = str(int(connect_from.strip())-1) if connect_from.strip().isdigit() else ""
+                    lt = str(int(loop_to.strip())-1)     if loop_to.strip().isdigit()     else ""
+                    st.session_state.steps.append({
+                        "shape": SHAPE_TYPES[shape_label], "text": step_text,
+                        "column": col_choice, "input_label": input_label,
+                        "output_label": output_label, "responsible": responsible,
+                        "doc_format": doc_format, "measurement": measurement,
+                        "yes_label": yes_label, "no_label": no_label,
+                        "connect_from": cf, "connect_side": connect_side,
+                        "arrow_label": arrow_label, "loop_to": lt, "loop_label": loop_label,
+                    })
+                    st.success(f"✅ Step {n_steps+1} added: [{shape_label}] {step_text}")
+                    st.rerun()
+                else:
+                    st.warning("Please enter shape text.")
 
         st.divider()
         n = len(st.session_state.steps)
         if n:
-            st.subheader(f"Steps ({n})  — click to edit or reorder")
+            st.subheader(f"Steps ({n})  — edit or reorder")
             reverse_map = {v: k for k, v in SHAPE_TYPES.items()}
             for i, step in enumerate(st.session_state.steps):
                 label   = reverse_map.get(step["shape"], step["shape"])
@@ -940,10 +717,7 @@ with tab2:
                         st.session_state.steps.pop(i); st.rerun()
                     st.caption(f"Connect from: step {cf_disp}  |  Side: {step.get('connect_side','bottom')}  |  Arrow: {step.get('arrow_label') or '—'}  |  Loop to: {lt_disp}")
         else:
-            if "AI" in mode:
-                st.info("Describe your process above and click **✨ Generate Flowchart with AI**.")
-            else:
-                st.info("No steps yet. Use the form above to add process flow steps.")
+            st.info("No steps yet. Use the form above to add process flow steps.")
 
     with preview_col:
         st.subheader("👁️ Live Flowchart Preview")
@@ -961,144 +735,8 @@ with tab2:
                 ("🟨","Diamond","Decision"),("🟩","Parallelogram","Input / Output")]):
                 gc.markdown(f"{icon} **{name}**  \n{desc}")
 
-# ── TAB 3: Decision Engine ────────────────────────────────────────────────────
+# ── TAB 3: Change Record ───────────────────────────────────────────────────────
 with tab3:
-    st.markdown("""
-    <div class="de-banner">
-        ⚙️ <b>Process → Decision Engine</b> — Paste any process flow, SOP, or plain-English description.
-        AI will extract decision logic, build a rule table, and generate automation-ready JSON.
-    </div>
-    """, unsafe_allow_html=True)
-
-    de_left, de_right = st.columns([1, 1], gap="large")
-
-    with de_left:
-        st.subheader("📥 Process Input")
-        st.caption("Paste a process or use one of the quick examples below.")
-
-        de_ex_cols = st.columns(3)
-        de_ex_labels = ["📦 Procurement", "🏖️ Leave", "🎧 Support Ticket"]
-        for i, (ec, el) in enumerate(zip(de_ex_cols, de_ex_labels)):
-            if ec.button(el, key=f"de_ex_{i}"):
-                st.session_state.de_input = DE_EXAMPLES[i]
-                st.rerun()
-
-        # Option: use existing SOP steps as input
-        if st.session_state.steps:
-            if st.button("📋 Use current SOP steps as input", use_container_width=True):
-                texts = [f"Step {i+1}: {s['text']}" for i, s in enumerate(st.session_state.steps)]
-                st.session_state.de_input = " → ".join(texts)
-                st.rerun()
-
-        de_input = st.text_area(
-            "Process description",
-            value=st.session_state.de_input,
-            height=220,
-            placeholder="e.g.  Start → Receive PO → Check stock → If available (YES): pick & pack → invoice → ship → End. If not (NO): raise procurement → wait → loop back.",
-            label_visibility="collapsed",
-            key="de_input_area",
-        )
-        st.session_state.de_input = de_input
-
-        de_btn_col, de_clr_col = st.columns([3, 1])
-        with de_btn_col:
-            de_run = st.button("⚙️ Convert to Decision Engine", type="primary", use_container_width=True)
-        with de_clr_col:
-            if st.button("🗑️ Clear", key="de_clear", use_container_width=True):
-                st.session_state.de_input = ""
-                st.session_state.de_result = None
-                st.rerun()
-
-        if de_run:
-            if not de_input.strip():
-                st.warning("Please enter a process description first.")
-            else:
-                with st.spinner("⚙️ Claude is building your decision engine…"):
-                    try:
-                        result = generate_decision_engine(de_input)
-                        if result:
-                            st.session_state.de_result = result
-                            st.success("✅ Decision engine generated!")
-                            st.rerun()
-                    except json.JSONDecodeError:
-                        st.error("⚠️ AI returned unexpected output. Try rephrasing.")
-                    except Exception as e:
-                        st.error(f"⚠️ Error: {e}")
-
-    with de_right:
-        st.subheader("📤 Output")
-        result = st.session_state.de_result
-
-        if not result:
-            st.info("Results will appear here after conversion.")
-        else:
-            out_tab1, out_tab2, out_tab3, out_tab4 = st.tabs([
-                "🔢 Simplified Flow",
-                "🧠 Decision Logic",
-                "📦 Rule Engine JSON",
-                "💡 Insights",
-            ])
-
-            # ── Simplified Flow ──
-            with out_tab1:
-                flow = result.get("simplified_flow", [])
-                if flow:
-                    for s in flow:
-                        st.markdown(f"**Step {s['step_number']}: {s['step_name']}**")
-                        st.caption(s["description"])
-                        if s["step_number"] < len(flow):
-                            st.markdown("↓")
-                else:
-                    st.info("No flow steps found.")
-
-            # ── Decision Logic ──
-            with out_tab2:
-                logic = result.get("decision_logic", [])
-                if logic:
-                    for item in logic:
-                        with st.expander(f"🔷 {item['step_name']}", expanded=True):
-                            rows = item.get("decisions", [])
-                            if rows:
-                                # Build table as markdown
-                                header = "| Condition | Action | Next Step | Type |"
-                                sep    = "|-----------|--------|-----------|------|"
-                                badge_map = {"YES": "✅", "NO": "❌", "AUTO": "🔵", "LOOP": "🔁"}
-                                body = "\n".join(
-                                    f"| {r['condition']} | {r['action']} | {r['next_step']} | {badge_map.get(r['type'], r['type'])} {r['type']} |"
-                                    for r in rows
-                                )
-                                st.markdown(f"{header}\n{sep}\n{body}")
-                else:
-                    st.info("No decision steps found.")
-
-            # ── Rule Engine JSON ──
-            with out_tab3:
-                rules = result.get("rule_engine", [])
-                if rules:
-                    json_str = json.dumps(rules, indent=2)
-                    st.code(json_str, language="json")
-                    st.download_button(
-                        label="📥 Download rule_engine.json",
-                        data=json_str,
-                        file_name="rule_engine.json",
-                        mime="application/json",
-                        use_container_width=True,
-                    )
-                else:
-                    st.info("No rules generated.")
-
-            # ── Insights ──
-            with out_tab4:
-                insights = result.get("insights", [])
-                if insights:
-                    icons = ["◈", "◉", "⬡", "◆", "▸"]
-                    for i, ins in enumerate(insights):
-                        st.info(f"{icons[i % len(icons)]}  {ins}")
-                else:
-                    st.info("No insights generated.")
-
-# ── TAB 4: Change Record ──────────────────────────────────────────────────────
-with tab4:
     st.subheader("SOP Change Record")
     with st.form("cr_form", clear_on_submit=True):
         r1c1,r1c2,r1c3,r1c4 = st.columns(4)
@@ -1124,22 +762,51 @@ with tab4:
         if cc2.button("🗑️", key=f"crdel_{i}"):
             st.session_state.change_records.pop(i); st.rerun()
 
-# ── TAB 5: Download PDF ───────────────────────────────────────────────────────
-with tab5:
-    st.subheader("Generate & Download PDF")
+# ── TAB 4: Export ──────────────────────────────────────────────────────────────
+with tab4:
+    st.subheader("Export SOP")
+
     if not st.session_state.steps:
-        st.warning("⚠️ Add at least one process step before generating the PDF.")
+        st.warning("⚠️ Add at least one process step before exporting.")
     else:
         st.success(f"Ready — **{len(st.session_state.steps)} step(s)** will be included.")
-        meta = {k: st.session_state[k] for k in [
-            "company_name","title","sop_no","rev_no","date","page_info",
-            "unit","area","sub_area","zone","owner","purpose","scope",
-            "composed_by","change_records"]}
-        pdf_buf = generate_pdf(st.session_state.steps, meta)
-        st.download_button(
-            label="📥 Download SOP PDF", data=pdf_buf,
-            file_name="SOP_Document.pdf", mime="application/pdf",
-            use_container_width=True)
+
+        col_json, col_pdf = st.columns(2)
+
+        # ── JSON download ──
+        with col_json:
+            st.markdown("#### 📦 Export as JSON")
+            st.caption("Download the full SOP data (header, steps, change records) as a structured JSON file.")
+            sop_data   = build_sop_json()
+            json_bytes = json.dumps(sop_data, indent=2, ensure_ascii=False).encode("utf-8")
+            safe_name  = st.session_state.sop_no.replace("/", "-")
+            st.download_button(
+                label="📥 Download SOP JSON",
+                data=json_bytes,
+                file_name=f"SOP_{safe_name}.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+            with st.expander("Preview JSON structure"):
+                st.json(sop_data)
+
+        # ── PDF download ──
+        with col_pdf:
+            st.markdown("#### 📄 Export as PDF")
+            st.caption("Download the formatted SOP document as a landscape A4 PDF.")
+            meta = {k: st.session_state[k] for k in [
+                "company_name","title","sop_no","rev_no","date","page_info",
+                "unit","area","sub_area","zone","owner","purpose","scope",
+                "composed_by","change_records"]}
+            pdf_buf = generate_pdf(st.session_state.steps, meta)
+            st.download_button(
+                label="📥 Download SOP PDF",
+                data=pdf_buf,
+                file_name=f"SOP_{safe_name}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+            )
+
         st.divider()
         st.subheader("Step Summary")
         reverse_map = {v:k for k,v in SHAPE_TYPES.items()}
@@ -1150,5 +817,6 @@ with tab5:
             "Connect from": str(int(s.get("connect_from",""))+1) if str(s.get("connect_from","")).isdigit() else "auto",
             "Arrow label": s.get("arrow_label",""),
             "Loop to": str(int(s.get("loop_to",""))+1) if str(s.get("loop_to","")).isdigit() else "—",
+            "Responsible": s.get("responsible",""),
         } for i,s in enumerate(st.session_state.steps)]
         st.dataframe(rows, use_container_width=True, hide_index=True)
