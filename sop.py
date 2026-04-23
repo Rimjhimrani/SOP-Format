@@ -102,6 +102,7 @@ EXAMPLES = [
 
 # ─── AI Generator (Google Gemini) ─────────────────────────────────────────────
 def generate_steps_with_ai(description: str):
+    import time
     api_key = st.session_state.get("gemini_api_key", "").strip()
     if not api_key:
         st.error("⚠️ Google Gemini API key not found. Please enter your API key in the sidebar.")
@@ -109,13 +110,29 @@ def generate_steps_with_ai(description: str):
 
     client = genai.Client(api_key=api_key)
     prompt = f"Convert this process into SOP flowchart steps:\n\n{description}"
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=AI_SYSTEM_PROMPT,
-        ),
-    )
+
+    max_retries = 4
+    wait_seconds = [5, 10, 20, 30]
+    response = None
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=AI_SYSTEM_PROMPT,
+                ),
+            )
+            break
+        except Exception as e:
+            err_str = str(e)
+            is_retryable = any(x in err_str for x in ["503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"])
+            if is_retryable and attempt < max_retries - 1:
+                wait = wait_seconds[attempt]
+                st.warning(f"\u23f3 Gemini is busy (attempt {attempt+1}/{max_retries}). Retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise
     raw = response.text.strip()
     # Strip any accidental markdown fences
     raw = raw.replace("```json", "").replace("```", "").strip()
