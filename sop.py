@@ -2,12 +2,13 @@ import streamlit as st
 import streamlit.components.v1 as components
 import io
 import json
+import requests
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.lib.units import mm
 
-st.set_page_config(page_title="SOP Builder", layout="wide")
+st.set_page_config(page_title="SOP Builder — Gemini AI", layout="wide")
 
 # ─── Session State ─────────────────────────────────────────────────────────────
 defaults = {
@@ -26,6 +27,8 @@ defaults = {
     "owner": "Stores Manager",
     "company_name": "PINNACLE MOBILITY",
     "composed_by": "Agilomatrix Pvt Ltd (connectus@agilomatrix.com)",
+    "gemini_api_key": "",
+    "ai_chat_history": [],
     "change_records": [
         {"sno": "1", "date": "17-12-2024", "rev": "0.0", "desc": "Original Version",
          "change_letter": "NA", "prepared": "Prince S", "reviewed": "Ajay G", "approved": "Vilas B"},
@@ -44,6 +47,89 @@ SHAPE_TYPES = {
 }
 COLUMN_OPTIONS       = ["left", "right"]
 CONNECT_SIDE_OPTIONS = ["bottom (default)", "right side →", "left side ←"]
+
+# ─── Gemini AI Helper ──────────────────────────────────────────────────────────
+def call_gemini(prompt: str, system_context: str = "") -> str:
+    api_key = st.session_state.gemini_api_key.strip()
+    if not api_key:
+        return "⚠️ Please enter your Gemini API key in the sidebar."
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+    full_prompt = f"{system_context}\n\n{prompt}" if system_context else prompt
+
+    payload = {
+        "contents": [{"parts": [{"text": full_prompt}]}],
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 1500},
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+    except requests.exceptions.HTTPError as e:
+        if resp.status_code == 400:
+            return "❌ Invalid Gemini API key. Please check and re-enter."
+        elif resp.status_code == 429:
+            return "❌ Gemini quota exceeded. Try again later or upgrade your plan."
+        return f"❌ API error: {e}"
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
+def gemini_suggest_next_step() -> dict:
+    steps_ctx = "\n".join([f"{i+1}. [{s['shape']}] {s['text']}" for i, s in enumerate(st.session_state.steps)])
+    system = (
+        "You are an SOP process design expert. Given the existing steps, suggest ONE logical next step. "
+        "Reply ONLY with a valid JSON object (no markdown, no backticks): "
+        '{"shape":"rect|diamond|oval|parallelogram|arrow_text","text":"...","responsible":"...","input_label":"","output_label":"","arrow_label":""}'
+    )
+    user = f"SOP Title: {st.session_state.title}\nExisting steps:\n{steps_ctx if steps_ctx else 'None yet'}\n\nSuggest the next step."
+    raw = call_gemini(user, system)
+    raw = raw.strip().replace("```json", "").replace("```", "").strip()
+    try:
+        return json.loads(raw)
+    except Exception:
+        return {"shape": "rect", "text": raw[:80], "responsible": "", "input_label": "", "output_label": "", "arrow_label": ""}
+
+
+def gemini_generate_full_sop(description: str) -> list:
+    system = (
+        "You are an SOP process design expert. Generate a complete list of SOP steps based on the description. "
+        "Reply ONLY with a valid JSON array (no markdown, no backticks): "
+        '[{"shape":"rect|diamond|oval|parallelogram","text":"...","responsible":"...","input_label":"","output_label":"","arrow_label":"","measurement":"","doc_format":""},...]'
+        "\nUse 'diamond' for decision/check steps, 'oval' for start/end, 'rect' for normal process steps, 'parallelogram' for input/output."
+    )
+    raw = call_gemini(description, system)
+    raw = raw.strip().replace("```json", "").replace("```", "").strip()
+    try:
+        return json.loads(raw)
+    except Exception:
+        return []
+
+
+def gemini_analyze_flow() -> str:
+    steps_ctx = "\n".join([f"{i+1}. [{s['shape']}] {s['text']} (resp: {s.get('responsible','')})" for i, s in enumerate(st.session_state.steps)])
+    system = "You are a process improvement expert. Analyze the SOP flow and give concise feedback: gaps, inefficiencies, missing steps, suggestions. Keep it under 150 words."
+    user = f"SOP Title: {st.session_state.title}\nSteps:\n{steps_ctx}"
+    return call_gemini(user, system)
+
+
+def gemini_improve_step(step_text: str) -> str:
+    system = "You are an SOP writing expert. Improve the given step text to be clearer, more action-oriented, and professional. Reply with ONLY the improved text (no quotes, no explanation)."
+    return call_gemini(f"Improve this SOP step: {step_text}", system)
+
+
+def gemini_chat(user_message: str) -> str:
+    history_ctx = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in st.session_state.ai_chat_history[-6:]])
+    steps_ctx = "\n".join([f"{i+1}. [{s['shape']}] {s['text']}" for i, s in enumerate(st.session_state.steps)])
+    system = (
+        f"You are an SOP expert assistant. The user is building an SOP titled '{st.session_state.title}'. "
+        f"Current steps:\n{steps_ctx if steps_ctx else 'None yet'}\n\n"
+        "Answer questions, give advice, or help improve the SOP. Be concise and practical."
+    )
+    full_prompt = f"{history_ctx}\nUSER: {user_message}" if history_ctx else f"USER: {user_message}"
+    return call_gemini(full_prompt, system)
+
 
 # ─── SVG Preview ───────────────────────────────────────────────────────────────
 def generate_svg_preview(steps):
@@ -541,51 +627,77 @@ def generate_pdf(steps, meta):
     c.save(); buf.seek(0); return buf
 
 
-# ─── JSON Export Helper ────────────────────────────────────────────────────────
 def build_sop_json():
     return {
-        "header": {
-            "company_name":  st.session_state.company_name,
-            "title":         st.session_state.title,
-            "sop_no":        st.session_state.sop_no,
-            "rev_no":        st.session_state.rev_no,
-            "date":          st.session_state.date,
-            "page_info":     st.session_state.page_info,
-            "unit":          st.session_state.unit,
-            "area":          st.session_state.area,
-            "sub_area":      st.session_state.sub_area,
-            "zone":          st.session_state.zone,
-            "owner":         st.session_state.owner,
-            "purpose":       st.session_state.purpose,
-            "scope":         st.session_state.scope,
-            "composed_by":   st.session_state.composed_by,
-        },
-        "steps":          st.session_state.steps,
+        "header": {k: st.session_state[k] for k in [
+            "company_name","title","sop_no","rev_no","date","page_info",
+            "unit","area","sub_area","zone","owner","purpose","scope","composed_by"]},
+        "steps": st.session_state.steps,
         "change_records": st.session_state.change_records,
     }
 
 
-# ─── Streamlit UI ──────────────────────────────────────────────────────────────
+# ─── Sidebar — Gemini API Key ──────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 🤖 Gemini AI Settings")
+    st.markdown(
+        "Get a **free** API key at "
+        "[aistudio.google.com](https://aistudio.google.com/app/apikey)",
+        unsafe_allow_html=False,
+    )
+    key_input = st.text_input(
+        "Gemini API Key",
+        value=st.session_state.gemini_api_key,
+        type="password",
+        placeholder="AIza...",
+        help="Gemini 2.0 Flash is used — generous free tier, no credit card needed.",
+    )
+    if key_input != st.session_state.gemini_api_key:
+        st.session_state.gemini_api_key = key_input
+
+    if st.session_state.gemini_api_key:
+        st.success("✅ API key set")
+    else:
+        st.warning("⚠️ Enter key to use AI features")
+
+    st.divider()
+    st.markdown("**Model:** `gemini-2.0-flash`")
+    st.markdown("**Free tier:** 15 req/min · 1M tokens/day")
+    st.markdown("[Get free key →](https://aistudio.google.com/app/apikey)")
+
+    st.divider()
+    st.markdown("**Steps loaded:** " + str(len(st.session_state.steps)))
+    if st.button("🗑️ Clear all steps", use_container_width=True):
+        st.session_state.steps = []
+        st.rerun()
+
+
+# ─── Main UI ──────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     .block-container { padding-top: 1rem; }
-    h1 { font-size: 1.35rem; margin-bottom: 0.2rem; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.2rem; }
     h2 { font-size: 1.05rem; }
     .stButton > button { width: 100%; }
+    .gemini-badge {
+        display:inline-block; background:#1a73e8; color:white;
+        padding:3px 12px; border-radius:20px; font-size:12px; margin-left:8px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📋 SOP Builder — Standard Operating Procedure")
-st.caption("Fill in the details, build your process flow manually, then export as JSON or PDF.")
+st.title("📋 SOP Builder")
+st.caption("Standard Operating Procedure builder powered by Google Gemini AI (free tier)")
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🏷️ Header Info",
     "🔷 Process Flow",
+    "🤖 Gemini AI Tools",
     "📝 Change Record",
     "📄 Export",
 ])
 
-# ── TAB 1: Header ──────────────────────────────────────────────────────────────
+# ── TAB 1 ──────────────────────────────────────────────────────────────────────
 with tab1:
     st.subheader("Document Header Fields")
     c1, c2, c3 = st.columns(3)
@@ -609,7 +721,7 @@ with tab1:
     st.session_state.purpose = st.text_input("Purpose", st.session_state.purpose)
     st.session_state.scope   = st.text_area("Scope",    st.session_state.scope, height=80)
 
-# ── TAB 2: Process Flow ────────────────────────────────────────────────────────
+# ── TAB 2 ──────────────────────────────────────────────────────────────────────
 with tab2:
     input_col, preview_col = st.columns([1, 1], gap="large")
 
@@ -633,7 +745,7 @@ with tab2:
             fa, fb = st.columns([2, 3])
             with fa:
                 shape_label = st.selectbox("Shape Type", list(SHAPE_TYPES.keys()))
-                col_choice  = st.selectbox("Column (left = main flow)", COLUMN_OPTIONS)
+                col_choice  = st.selectbox("Column", COLUMN_OPTIONS)
             with fb:
                 step_text = st.text_input("Text inside shape *")
 
@@ -656,7 +768,7 @@ with tab2:
                 connect_from = st.text_input("Connect from step # (blank = auto)")
                 connect_side = st.selectbox("Arrow exits source from", CONNECT_SIDE_OPTIONS)
             with ar2:
-                arrow_label = st.text_input("Arrow label (e.g. YES / NO / blank)")
+                arrow_label = st.text_input("Arrow label (YES / NO / blank)")
             with ar3:
                 loop_to    = st.text_input("Loop-back to step # (blank = none)")
                 loop_label = st.text_input("Loop arrow label")
@@ -682,15 +794,13 @@ with tab2:
         st.divider()
         n = len(st.session_state.steps)
         if n:
-            st.subheader(f"Steps ({n})  — edit or reorder")
+            st.subheader(f"Steps ({n})")
             reverse_map = {v: k for k, v in SHAPE_TYPES.items()}
             for i, step in enumerate(st.session_state.steps):
-                label   = reverse_map.get(step["shape"], step["shape"])
+                label = reverse_map.get(step["shape"], step["shape"])
                 col_tag = "🔵 left" if step.get("column","left")=="left" else "🟢 right"
                 cf_raw  = step.get("connect_from","")
                 cf_disp = str(int(cf_raw)+1) if str(cf_raw).isdigit() else "auto"
-                lt_raw  = step.get("loop_to","")
-                lt_disp = str(int(lt_raw)+1) if str(lt_raw).isdigit() else "—"
                 with st.expander(f"**Step {i+1}** {col_tag} › [{label}]  {step['text']}", expanded=False):
                     new_text = st.text_input("Edit text", value=step["text"], key=f"edit_{i}")
                     if new_text != step["text"]:
@@ -702,41 +812,147 @@ with tab2:
                     if nr != step.get("responsible",""): st.session_state.steps[i]["responsible"] = nr; st.rerun()
                     if nd != step.get("doc_format",""):  st.session_state.steps[i]["doc_format"]  = nd; st.rerun()
                     if nm != step.get("measurement",""): st.session_state.steps[i]["measurement"] = nm; st.rerun()
+
+                    # AI Improve button
+                    if st.button("✨ Gemini: improve this step text", key=f"improve_{i}"):
+                        with st.spinner("Gemini improving..."):
+                            improved = gemini_improve_step(step["text"])
+                        if not improved.startswith("❌") and not improved.startswith("⚠️"):
+                            st.session_state.steps[i]["text"] = improved
+                            st.success(f"Improved: {improved}")
+                            st.rerun()
+                        else:
+                            st.error(improved)
+
                     bc1, bc2, bc3, _ = st.columns([1,1,1,4])
-                    if bc1.button("⬆️ Up",     key=f"up_{i}"):
+                    if bc1.button("⬆️", key=f"up_{i}"):
                         if i>0:
                             st.session_state.steps[i], st.session_state.steps[i-1] = \
                                 st.session_state.steps[i-1], st.session_state.steps[i]
                         st.rerun()
-                    if bc2.button("⬇️ Down",   key=f"dn_{i}"):
+                    if bc2.button("⬇️", key=f"dn_{i}"):
                         if i<len(st.session_state.steps)-1:
                             st.session_state.steps[i], st.session_state.steps[i+1] = \
                                 st.session_state.steps[i+1], st.session_state.steps[i]
                         st.rerun()
                     if bc3.button("🗑️ Delete", key=f"del_{i}"):
                         st.session_state.steps.pop(i); st.rerun()
-                    st.caption(f"Connect from: step {cf_disp}  |  Side: {step.get('connect_side','bottom')}  |  Arrow: {step.get('arrow_label') or '—'}  |  Loop to: {lt_disp}")
+                    st.caption(f"Connect from: step {cf_disp}  |  Arrow: {step.get('arrow_label') or '—'}")
         else:
-            st.info("No steps yet. Use the form above to add process flow steps.")
+            st.info("No steps yet. Use the form above or the Gemini AI Tools tab.")
 
     with preview_col:
         st.subheader("👁️ Live Flowchart Preview")
-        st.caption("Updates automatically as steps change.")
         preview_html = render_preview_html(st.session_state.steps)
         n = len(st.session_state.steps)
         est_h = max(320, min(900, n * 88 + 150)) if n > 0 else 260
         components.html(preview_html, height=est_h, scrolling=False)
-        if st.session_state.steps:
-            st.markdown("---")
-            st.markdown("**Shape colour guide:**")
-            guide_cols = st.columns(4)
-            for gc, (icon, name, desc) in zip(guide_cols, [
-                ("🟦","Rectangle","Process step"),("⬛","Oval","Start / End"),
-                ("🟨","Diamond","Decision"),("🟩","Parallelogram","Input / Output")]):
-                gc.markdown(f"{icon} **{name}**  \n{desc}")
 
-# ── TAB 3: Change Record ───────────────────────────────────────────────────────
+# ── TAB 3 — Gemini AI Tools ────────────────────────────────────────────────────
 with tab3:
+    st.subheader("🤖 Gemini AI Tools")
+    st.caption("All features use **Gemini 2.0 Flash** — free tier, no credit card required.")
+
+    if not st.session_state.gemini_api_key:
+        st.warning("⚠️ Enter your Gemini API key in the sidebar to use AI features.")
+        st.markdown("**Get your free key:** [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)")
+    else:
+        # ── Feature 1: Generate full SOP
+        st.markdown("### 1️⃣ Generate Complete SOP from Description")
+        with st.form("gen_sop_form"):
+            sop_desc = st.text_area(
+                "Describe your process",
+                placeholder="e.g. Generate a 7-step SOP for receiving goods in a warehouse: unloading, inspection, GRN creation, quality check, putaway, system update, and closure.",
+                height=100,
+            )
+            gen_col1, gen_col2 = st.columns(2)
+            with gen_col1:
+                replace_existing = st.checkbox("Replace existing steps", value=False)
+            if st.form_submit_button("✨ Generate SOP Steps with Gemini", use_container_width=True):
+                if sop_desc.strip():
+                    with st.spinner("Gemini is generating your SOP steps..."):
+                        new_steps = gemini_generate_full_sop(sop_desc)
+                    if new_steps:
+                        if replace_existing:
+                            st.session_state.steps = []
+                        for s in new_steps:
+                            s.setdefault("column", "left")
+                            s.setdefault("connect_from", "")
+                            s.setdefault("connect_side", "bottom (default)")
+                            s.setdefault("loop_to", "")
+                            s.setdefault("loop_label", "")
+                            s.setdefault("yes_label", "YES")
+                            s.setdefault("no_label", "NO")
+                            st.session_state.steps.append(s)
+                        st.success(f"✅ {len(new_steps)} steps generated and added!")
+                        st.rerun()
+                    else:
+                        st.error("Could not parse Gemini response. Try rephrasing.")
+                else:
+                    st.warning("Please enter a description.")
+
+        st.divider()
+
+        # ── Feature 2: Suggest next step
+        st.markdown("### 2️⃣ Suggest Next Step")
+        st.caption("Gemini looks at your current steps and proposes the most logical next one.")
+        if st.button("🔮 Suggest Next Step", use_container_width=True):
+            with st.spinner("Gemini thinking..."):
+                suggestion = gemini_suggest_next_step()
+            if suggestion and suggestion.get("text"):
+                suggestion.setdefault("column", "left")
+                suggestion.setdefault("connect_from", "")
+                suggestion.setdefault("connect_side", "bottom (default)")
+                suggestion.setdefault("loop_to", "")
+                suggestion.setdefault("loop_label", "")
+                suggestion.setdefault("yes_label", "YES")
+                suggestion.setdefault("no_label", "NO")
+                st.session_state.steps.append(suggestion)
+                st.success(f"✅ Added: [{suggestion.get('shape','rect')}] {suggestion.get('text','')}")
+                st.rerun()
+            else:
+                st.error("Could not generate suggestion.")
+
+        st.divider()
+
+        # ── Feature 3: Analyze flow
+        st.markdown("### 3️⃣ Analyze & Improve Flow")
+        st.caption("Gemini reviews all your steps and identifies gaps, missing steps, and inefficiencies.")
+        if st.button("🔍 Analyze SOP Flow", use_container_width=True):
+            if not st.session_state.steps:
+                st.warning("Add at least one step first.")
+            else:
+                with st.spinner("Gemini analyzing your process flow..."):
+                    analysis = gemini_analyze_flow()
+                st.markdown("**Gemini's Analysis:**")
+                st.info(analysis)
+
+        st.divider()
+
+        # ── Feature 4: AI Chat
+        st.markdown("### 4️⃣ Chat with Gemini about your SOP")
+        chat_container = st.container()
+        with chat_container:
+            for msg in st.session_state.ai_chat_history:
+                role_icon = "🧑" if msg["role"] == "user" else "🤖"
+                with st.chat_message(msg["role"]):
+                    st.write(f"{role_icon} {msg['content']}")
+
+        user_q = st.chat_input("Ask Gemini anything about your SOP...")
+        if user_q:
+            st.session_state.ai_chat_history.append({"role": "user", "content": user_q})
+            with st.spinner("Gemini responding..."):
+                reply = gemini_chat(user_q)
+            st.session_state.ai_chat_history.append({"role": "assistant", "content": reply})
+            st.rerun()
+
+        if st.session_state.ai_chat_history:
+            if st.button("🗑️ Clear chat history"):
+                st.session_state.ai_chat_history = []
+                st.rerun()
+
+# ── TAB 4 ──────────────────────────────────────────────────────────────────────
+with tab4:
     st.subheader("SOP Change Record")
     with st.form("cr_form", clear_on_submit=True):
         r1c1,r1c2,r1c3,r1c4 = st.columns(4)
@@ -762,21 +978,17 @@ with tab3:
         if cc2.button("🗑️", key=f"crdel_{i}"):
             st.session_state.change_records.pop(i); st.rerun()
 
-# ── TAB 4: Export ──────────────────────────────────────────────────────────────
-with tab4:
+# ── TAB 5 ──────────────────────────────────────────────────────────────────────
+with tab5:
     st.subheader("Export SOP")
-
     if not st.session_state.steps:
         st.warning("⚠️ Add at least one process step before exporting.")
     else:
         st.success(f"Ready — **{len(st.session_state.steps)} step(s)** will be included.")
-
         col_json, col_pdf = st.columns(2)
 
-        # ── JSON download ──
         with col_json:
             st.markdown("#### 📦 Export as JSON")
-            st.caption("Download the full SOP data (header, steps, change records) as a structured JSON file.")
             sop_data   = build_sop_json()
             json_bytes = json.dumps(sop_data, indent=2, ensure_ascii=False).encode("utf-8")
             safe_name  = st.session_state.sop_no.replace("/", "-")
@@ -787,13 +999,11 @@ with tab4:
                 mime="application/json",
                 use_container_width=True,
             )
-            with st.expander("Preview JSON structure"):
+            with st.expander("Preview JSON"):
                 st.json(sop_data)
 
-        # ── PDF download ──
         with col_pdf:
             st.markdown("#### 📄 Export as PDF")
-            st.caption("Download the formatted SOP document as a landscape A4 PDF.")
             meta = {k: st.session_state[k] for k in [
                 "company_name","title","sop_no","rev_no","date","page_info",
                 "unit","area","sub_area","zone","owner","purpose","scope",
@@ -814,9 +1024,7 @@ with tab4:
             "Step": i+1, "Col": s.get("column","left"),
             "Shape": reverse_map.get(s["shape"], s["shape"]),
             "Text": s["text"],
-            "Connect from": str(int(s.get("connect_from",""))+1) if str(s.get("connect_from","")).isdigit() else "auto",
-            "Arrow label": s.get("arrow_label",""),
-            "Loop to": str(int(s.get("loop_to",""))+1) if str(s.get("loop_to","")).isdigit() else "—",
+            "Arrow": s.get("arrow_label",""),
             "Responsible": s.get("responsible",""),
         } for i,s in enumerate(st.session_state.steps)]
         st.dataframe(rows, use_container_width=True, hide_index=True)
