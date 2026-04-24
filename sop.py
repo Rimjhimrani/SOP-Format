@@ -100,9 +100,7 @@ EXAMPLES = [
     "Raw material arrives → Inspect quality → If pass (YES): Move to production → Manufacture product → Final QC check → If QC pass (YES): Pack and label → Dispatch → End. If QC fail (NO): Rework or scrap",
 ]
 
-# ─── Helper: sanitize a single step's string fields ───────────────────────────
 def sanitize_step(step):
-    """Replace None with '' for all string fields that may come back as null from AI."""
     str_fields = [
         "arrow_label", "loop_label", "input_label", "output_label",
         "responsible", "doc_format", "measurement", "yes_label", "no_label",
@@ -111,10 +109,8 @@ def sanitize_step(step):
     for f in str_fields:
         if step.get(f) is None:
             step[f] = ""
-    # Ensure connect_from and loop_to are strings (not None/int)
     step["connect_from"] = str(step["connect_from"]) if step.get("connect_from") is not None else ""
     step["loop_to"]      = str(step["loop_to"])      if step.get("loop_to")      is not None else ""
-    # Restore defaults for fields that must not be empty
     if not step.get("yes_label"):
         step["yes_label"] = "YES"
     if not step.get("no_label"):
@@ -125,7 +121,6 @@ def sanitize_step(step):
         step["column"] = "left"
     return step
 
-# ─── AI Generator (Google Gemini) ─────────────────────────────────────────────
 def generate_steps_with_ai(description: str):
     import time
     api_key = st.session_state.get("gemini_api_key", "").strip()
@@ -175,7 +170,6 @@ def generate_steps_with_ai(description: str):
     if not isinstance(parsed, list):
         raise ValueError("AI returned non-list JSON")
 
-    # Normalise & sanitize every step
     for step in parsed:
         step.setdefault("input_label", "")
         step.setdefault("output_label", "")
@@ -272,7 +266,6 @@ def generate_svg_preview(steps):
 
     for idx, step in enumerate(steps):
         a = anchors[idx]
-        # ── FIX: use "or" to guard against None values ──
         lbl          = (step.get("arrow_label")  or "").strip()
         connect_from = (step.get("connect_from") or "")
         connect_side = (step.get("connect_side") or "bottom (default)")
@@ -468,7 +461,7 @@ def draw_left_text(c, text, x, cy, max_w, font_name="Helvetica", font_size=6.5, 
     for i, line in enumerate(lines): c.drawString(x, start_y-i*line_h, line)
 
 def arrowhead(c, tip_x, tip_y, direction="down"):
-    size=3.5; c.setFillColor(colors.black); p=c.beginPath()
+    size=2.5; c.setFillColor(colors.black); p=c.beginPath()
     if direction=="down":
         p.moveTo(tip_x,tip_y); p.lineTo(tip_x-size,tip_y+size*1.5); p.lineTo(tip_x+size,tip_y+size*1.5)
     elif direction=="up":
@@ -480,42 +473,42 @@ def arrowhead(c, tip_x, tip_y, direction="down"):
     p.close(); c.drawPath(p, fill=1, stroke=0)
 
 def draw_arrow_down(c, x, y_from, y_to, color=colors.black):
-    c.setStrokeColor(color); c.setLineWidth(0.8); size=3.5
+    c.setStrokeColor(color); c.setLineWidth(0.6); size=2.5
     c.line(x, y_from, x, y_to+size*1.5); arrowhead(c, x, y_to, "down"); c.setStrokeColor(colors.black)
 
 def draw_elbow_arrow(c, sx, sy, ex, ey, color=colors.black, label="", label_color=colors.black):
-    c.setStrokeColor(color); c.setLineWidth(0.8); size=3.5
+    c.setStrokeColor(color); c.setLineWidth(0.6); size=2.5
     c.line(sx, sy, ex, sy)
     if ey<sy: c.line(ex, sy, ex, ey+size*1.5); arrowhead(c, ex, ey, "down")
     else:     c.line(ex, sy, ex, ey-size*1.5); arrowhead(c, ex, ey, "up")
     if label:
-        c.setFont("Helvetica-Bold",6); c.setFillColor(label_color)
-        c.drawCentredString((sx+ex)/2, sy+2.5, label)
+        c.setFont("Helvetica-Bold",5); c.setFillColor(label_color)
+        c.drawCentredString((sx+ex)/2, sy+2, label)
     c.setStrokeColor(colors.black); c.setFillColor(colors.black)
 
-def draw_rect_shape(c, x, y, w, h, text, font_size=7):
-    c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.8)
+def draw_rect_shape(c, x, y, w, h, text, font_size=6.5):
+    c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.6)
     c.rect(x, y, w, h, fill=1, stroke=1)
-    draw_centered_text(c, text, x+w/2, y+h/2, w-4, font_size=font_size)
+    draw_centered_text(c, text, x+w/2, y+h/2, w-3, font_size=font_size)
 
-def draw_oval_shape(c, x, y, w, h, text, font_size=7):
-    c.setStrokeColor(colors.black); c.setFillColor(colors.HexColor("#2c2c2c")); c.setLineWidth(0.8)
+def draw_oval_shape(c, x, y, w, h, text, font_size=6.5):
+    c.setStrokeColor(colors.black); c.setFillColor(colors.HexColor("#2c2c2c")); c.setLineWidth(0.6)
     c.ellipse(x, y, x+w, y+h, fill=1, stroke=1)
-    draw_centered_text(c, text, x+w/2, y+h/2, w-6, font_size=font_size, color=colors.white)
+    draw_centered_text(c, text, x+w/2, y+h/2, w-4, font_size=font_size, color=colors.white)
 
-def draw_diamond_shape(c, x, y, w, h, text, font_size=6.5):
+def draw_diamond_shape(c, x, y, w, h, text, font_size=6):
     cx,cy=x+w/2,y+h/2; p=c.beginPath()
     p.moveTo(cx,y+h); p.lineTo(x+w,cy); p.lineTo(cx,y); p.lineTo(x,cy); p.close()
-    c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.8)
+    c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.6)
     c.drawPath(p, fill=1, stroke=1)
-    draw_centered_text(c, text, cx, cy, w*0.55, font_size=font_size)
+    draw_centered_text(c, text, cx, cy, w*0.5, font_size=font_size)
 
-def draw_parallelogram_shape(c, x, y, w, h, text, font_size=7):
-    skew=7; p=c.beginPath()
+def draw_parallelogram_shape(c, x, y, w, h, text, font_size=6.5):
+    skew=5; p=c.beginPath()
     p.moveTo(x+skew,y+h); p.lineTo(x+w,y+h); p.lineTo(x+w-skew,y); p.lineTo(x,y); p.close()
-    c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.8)
+    c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.6)
     c.drawPath(p, fill=1, stroke=1)
-    draw_centered_text(c, text, x+w/2, y+h/2, w-10, font_size=font_size)
+    draw_centered_text(c, text, x+w/2, y+h/2, w-8, font_size=font_size)
 
 def draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_bottoms):
     ML_x=XS[0]; total_w=XS[-1]-XS[0]; total_h=table_top-table_bottom
@@ -531,63 +524,152 @@ def draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_botto
         if FLOW_COL_IDX<len(XS)-2: c.line(XS[FLOW_COL_IDX+1], y, XS[-1], y)
 
 def generate_pdf(steps, meta):
-    buf=io.BytesIO(); PW,PH=landscape(A4); c=canvas.Canvas(buf, pagesize=(PW,PH))
-    ML=14*mm; MR=14*mm; MT=12*mm; TW=PW-ML-MR; cur_y=PH-MT
-    HEADER_H=22*mm; left_w=44*mm; right_w=83*mm; centre_w=TW-left_w-right_w
-    c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
-    c.drawString(ML, cur_y-7, meta["company_name"])
-    c.setFont("Helvetica-Bold",10); c.setFillColor(colors.HexColor("#1a6dcc"))
-    c.drawString(ML, cur_y-18, "eka"); c.setFillColor(colors.black)
-    cx_title=ML+left_w+centre_w/2
-    c.setFont("Helvetica-Bold",13); c.drawCentredString(cx_title, cur_y-7, "STANDARD OPERATING PROCEDURE")
-    c.setFont("Helvetica",8.5); draw_centered_text(c, meta["title"], cx_title, cur_y-18, centre_w-4, font_size=8.5)
-    RX=ML+left_w+centre_w; c1w,c2w,c3w=18*mm,24*mm,12*mm; rh=HEADER_H/4
-    meta_rows=[("SOP No.",meta["sop_no"],"Page",meta["page_info"]),
-               ("Rev No.",meta["rev_no"],"Date",meta["date"]),
-               ("Unit",meta["unit"],"Area",meta["area"]),
-               ("Sub Area",meta["sub_area"],"Zone",meta["zone"])]
+    buf=io.BytesIO()
+    PW,PH=landscape(A4)
+    c=canvas.Canvas(buf, pagesize=(PW,PH))
+
+    ML=10*mm; MR=10*mm; MT=10*mm
+    TW=PW-ML-MR
+    cur_y=PH-MT
+
+    # ── HEADER ────────────────────────────────────────────────────────────────
+    HEADER_H=20*mm
+    left_w=42*mm; right_w=76*mm; centre_w=TW-left_w-right_w
+
+    # Outer header border
+    c.setStrokeColor(colors.black); c.setLineWidth(0.8)
+    c.rect(ML, cur_y-HEADER_H, TW, HEADER_H, fill=0, stroke=1)
+
+    # Left cell – company name + logo text
+    c.setStrokeColor(colors.black); c.setLineWidth(0.5)
+    c.line(ML+left_w, cur_y-HEADER_H, ML+left_w, cur_y)
+
+    c.setFont("Helvetica-Bold", 9); c.setFillColor(colors.black)
+    c.drawString(ML+2, cur_y-7, meta["company_name"])
+    c.setFont("Helvetica-Bold", 9); c.setFillColor(colors.HexColor("#1a6dcc"))
+    c.drawString(ML+2, cur_y-15, "eka")
+    c.setFillColor(colors.black)
+
+    # Centre cell – title
+    c.line(ML+left_w+centre_w, cur_y-HEADER_H, ML+left_w+centre_w, cur_y)
+    cx_title = ML+left_w+centre_w/2
+    c.setFont("Helvetica-Bold", 11); c.setFillColor(colors.black)
+    c.drawCentredString(cx_title, cur_y-7, "STANDARD OPERATING PROCEDURE")
+    draw_centered_text(c, meta["title"], cx_title, cur_y-15, centre_w-4, font_size=7.5)
+
+    # Right cell – meta grid (4 rows x 4 cols)
+    RX = ML+left_w+centre_w
+    c1w=16*mm; c2w=22*mm; c3w=10*mm; c4w=right_w-c1w-c2w-c3w
+    rh = HEADER_H/4
+    meta_rows=[
+        ("SOP No.", meta["sop_no"], "Page", meta["page_info"]),
+        ("Rev No.", meta["rev_no"], "Date", meta["date"]),
+        ("Unit",    meta["unit"],   "Area", meta["area"]),
+        ("Sub Area",meta["sub_area"],"Zone",meta["zone"]),
+    ]
+    col_widths=[c1w,c2w,c3w,c4w]
     for ri,(l1,v1,l2,v2) in enumerate(meta_rows):
-        ry=cur_y-(ri+1)*rh; rxs=[RX,RX+c1w,RX+c1w+c2w,RX+c1w+c2w+c3w,RX+right_w]
+        ry=cur_y-(ri+1)*rh
+        rxs=[RX, RX+c1w, RX+c1w+c2w, RX+c1w+c2w+c3w, RX+right_w]
         for ci,(txt,is_lbl) in enumerate([(l1,True),(v1,False),(l2,True),(v2,False)]):
             cw=rxs[ci+1]-rxs[ci]
             c.setFillColor(colors.HexColor("#EEF3FF") if is_lbl else colors.white)
-            c.setStrokeColor(colors.black); c.setLineWidth(0.5)
+            c.setStrokeColor(colors.black); c.setLineWidth(0.4)
             c.rect(rxs[ci],ry,cw,rh,fill=1,stroke=1); c.setFillColor(colors.black)
-            fn="Helvetica-Bold" if is_lbl else "Helvetica"; fs=5.8 if is_lbl else 6.2
+            fn="Helvetica-Bold" if is_lbl else "Helvetica"; fs=5.5 if is_lbl else 6
             draw_left_text(c, txt, rxs[ci]+1.5, ry+rh/2, cw-3, fn, fs)
-    c.setLineWidth(1); c.line(ML, cur_y-HEADER_H, ML+TW, cur_y-HEADER_H); cur_y-=HEADER_H
-    PS_H=8*mm; PL_W,PV_W,SL_W=18*mm,82*mm,14*mm; SV_W=TW-PL_W-PV_W-SL_W
-    c.setLineWidth(0.6)
+
+    cur_y -= HEADER_H
+
+    # ── PURPOSE / SCOPE ────────────────────────────────────────────────────────
+    PS_H=7*mm
+    PL_W=16*mm; PV_W=76*mm; SL_W=13*mm; SV_W=TW-PL_W-PV_W-SL_W
+    c.setLineWidth(0.5)
     for x,w,txt,bold,centre in [
-        (ML,PL_W,"Purpose",True,False),(ML+PL_W,PV_W,meta["purpose"],False,False),
-        (ML+PL_W+PV_W,SL_W,"Scope",True,False),(ML+PL_W+PV_W+SL_W,SV_W,meta["scope"],False,True)]:
-        c.setFillColor(colors.white); c.rect(x,cur_y-PS_H,w,PS_H,fill=1,stroke=1); c.setFillColor(colors.black)
-        if bold: c.setFont("Helvetica-Bold",8); c.drawString(x+2, cur_y-PS_H+2.5, txt)
-        elif centre: draw_centered_text(c, txt, x+w/2, cur_y-PS_H/2, w-4, font_size=6.5)
-        else: draw_left_text(c, txt, x+2, cur_y-PS_H/2, w-4, font_size=7.5)
-    cur_y-=PS_H
-    COL_IN=25*mm; COL_OUT=22*mm; COL_RESP=28*mm; COL_DOC=24*mm; COL_MEAS=26*mm
-    COL_FLOW=TW-COL_IN-COL_OUT-COL_RESP-COL_DOC-COL_MEAS; FLOW_COL_IDX=1
-    XS=[ML,ML+COL_IN,ML+COL_IN+COL_FLOW,ML+COL_IN+COL_FLOW+COL_OUT,
-        ML+COL_IN+COL_FLOW+COL_OUT+COL_RESP,ML+COL_IN+COL_FLOW+COL_OUT+COL_RESP+COL_DOC,ML+TW]
-    FLOW_L=XS[1]; SH_W_L=COL_FLOW*0.44-2*mm; SH_W_R=COL_FLOW*0.44-2*mm
-    LEFT_CX=FLOW_L+COL_FLOW*0.25; RIGHT_CX=FLOW_L+COL_FLOW*0.75
-    HDR1_H=7*mm; c.setFillColor(colors.HexColor("#DDEEFF"))
+        (ML,       PL_W,"Purpose",True, False),
+        (ML+PL_W,  PV_W,meta["purpose"],False,False),
+        (ML+PL_W+PV_W, SL_W,"Scope",True, False),
+        (ML+PL_W+PV_W+SL_W, SV_W,meta["scope"],False,True)
+    ]:
+        c.setFillColor(colors.white)
+        c.rect(x,cur_y-PS_H,w,PS_H,fill=1,stroke=1)
+        c.setFillColor(colors.black)
+        if bold:
+            c.setFont("Helvetica-Bold",7); c.drawString(x+2, cur_y-PS_H+2, txt)
+        elif centre:
+            draw_centered_text(c, txt, x+w/2, cur_y-PS_H/2, w-4, font_size=6)
+        else:
+            draw_left_text(c, txt, x+2, cur_y-PS_H/2, w-4, font_size=7)
+    cur_y -= PS_H
+
+    # ── TABLE COLUMNS ─────────────────────────────────────────────────────────
+    # Match screenshot: Input | Process Flow | Output | Responsible | Doc.Format | Measurement
+    COL_IN   = 22*mm
+    COL_OUT  = 20*mm
+    COL_RESP = 25*mm
+    COL_DOC  = 22*mm
+    COL_MEAS = 24*mm
+    COL_FLOW = TW - COL_IN - COL_OUT - COL_RESP - COL_DOC - COL_MEAS
+    FLOW_COL_IDX = 1   # flow column is index 1 in XS array
+
+    XS=[ML,
+        ML+COL_IN,
+        ML+COL_IN+COL_FLOW,
+        ML+COL_IN+COL_FLOW+COL_OUT,
+        ML+COL_IN+COL_FLOW+COL_OUT+COL_RESP,
+        ML+COL_IN+COL_FLOW+COL_OUT+COL_RESP+COL_DOC,
+        ML+TW]
+
+    FLOW_L  = XS[1]
+    FLOW_W  = COL_FLOW
+
+    # Two sub-columns inside flow: left(main) and right(branch)
+    # Match screenshot: main flow slightly left of centre, branch to the right
+    LEFT_FRAC  = 0.32   # centre of left sub-col as fraction of FLOW_W
+    RIGHT_FRAC = 0.72
+    LEFT_CX  = FLOW_L + FLOW_W * LEFT_FRAC
+    RIGHT_CX = FLOW_L + FLOW_W * RIGHT_FRAC
+
+    # Shape widths – compact, like the screenshot
+    SH_W_L = FLOW_W * 0.38   # main flow shape width
+    SH_W_R = FLOW_W * 0.34   # branch shape width
+
+    # ── "Process Steps:" header bar ────────────────────────────────────────
+    HDR1_H=6*mm
+    c.setFillColor(colors.HexColor("#DDEEFF"))
     c.rect(ML,cur_y-HDR1_H,TW,HDR1_H,fill=1,stroke=1)
-    c.setFont("Helvetica-Bold",9); c.setFillColor(colors.black)
-    c.drawString(ML+3, cur_y-HDR1_H+2.5, "Process Steps:")
-    c.drawString(XS[3]+3, cur_y-HDR1_H+2.5, f"OWNER :   {meta['owner']}"); cur_y-=HDR1_H
-    HDR2_H=7*mm
+    c.setFont("Helvetica-Bold",8); c.setFillColor(colors.black)
+    c.drawString(ML+2, cur_y-HDR1_H+2, "Process Steps:")
+    c.drawString(XS[3]+2, cur_y-HDR1_H+2, f"OWNER :   {meta['owner']}")
+    cur_y -= HDR1_H
+
+    # ── Column header row ──────────────────────────────────────────────────
+    HDR2_H=6*mm
     col_labels=["Input","Process Flow","Output","Responsible","Doc. Format /\nSystem","Effective\nMeasurement"]
     for i,label in enumerate(col_labels):
-        cw=XS[i+1]-XS[i]; c.setFillColor(colors.HexColor("#EEF3FF"))
-        c.rect(XS[i],cur_y-HDR2_H,cw,HDR2_H,fill=1,stroke=1); c.setFillColor(colors.black)
-        lines=label.split("\n"); lh=6.5; sy=cur_y-HDR2_H/2+(len(lines)-1)*lh/2
+        cw=XS[i+1]-XS[i]
+        c.setFillColor(colors.HexColor("#EEF3FF"))
+        c.rect(XS[i],cur_y-HDR2_H,cw,HDR2_H,fill=1,stroke=1)
+        c.setFillColor(colors.black)
+        lines=label.split("\n"); lh=5.5; sy=cur_y-HDR2_H/2+(len(lines)-1)*lh/2
         for li,ln in enumerate(lines):
-            c.setFont("Helvetica-Bold",6.5); c.drawCentredString(XS[i]+cw/2, sy-li*(lh+0.5), ln)
-    cur_y-=HDR2_H
-    SHAPE_H={"rect":9*mm,"oval":9*mm,"parallelogram":9*mm,"diamond":15*mm,"arrow_text":6*mm}
-    V_PAD=5*mm; table_top=cur_y
+            c.setFont("Helvetica-Bold",5.5); c.drawCentredString(XS[i]+cw/2, sy-li*(lh+0.3), ln)
+    cur_y -= HDR2_H
+
+    # ── Shape sizes (compact – matching screenshot) ─────────────────────────
+    # rect/oval/parallelogram ≈ 8mm tall, diamond ≈ 13mm tall, arrow_text ≈ 5mm
+    SHAPE_H_PDF = {
+        "rect":          7*mm,
+        "oval":          7*mm,
+        "parallelogram": 7*mm,
+        "diamond":       13*mm,
+        "arrow_text":    5*mm,
+    }
+    V_PAD = 3*mm   # vertical padding above/below shape within row
+
+    table_top = cur_y
+
+    # ── Build paired rows (same as SVG logic) ─────────────────────────────
     paired_rows=[]; step_to_pair={}
     for idx,step in enumerate(steps):
         col=step.get("column","left")
@@ -600,124 +682,202 @@ def generate_pdf(steps, meta):
                 paired_rows.append({"left":None,"right":idx}); step_to_pair[idx]=len(paired_rows)-1
         else:
             paired_rows.append({"left":idx,"right":None}); step_to_pair[idx]=len(paired_rows)-1
+
+    # Calculate row geometries (y positions in PDF, going downward from cur_y)
     row_geom=[]; scan_y=cur_y
     for pair in paired_rows:
-        h_left =SHAPE_H.get(steps[pair["left"]]["shape"],  9*mm) if pair["left"]  is not None else 0
-        h_right=SHAPE_H.get(steps[pair["right"]]["shape"], 9*mm) if pair["right"] is not None else 0
-        ROW_H=max(h_left,h_right)+2*V_PAD; ry=scan_y-ROW_H
-        row_geom.append({"ry":ry,"ROW_H":ROW_H}); scan_y=ry
-    table_bottom=scan_y
-    row_bottoms=[rg["ry"] for rg in row_geom]
+        h_left  = SHAPE_H_PDF.get(steps[pair["left"]]["shape"],  7*mm) if pair["left"]  is not None else 0
+        h_right = SHAPE_H_PDF.get(steps[pair["right"]]["shape"], 7*mm) if pair["right"] is not None else 0
+        ROW_H = max(h_left, h_right) + 2*V_PAD
+        ry = scan_y - ROW_H
+        row_geom.append({"ry":ry, "ROW_H":ROW_H})
+        scan_y = ry
+
+    table_bottom = scan_y
+    row_bottoms  = [rg["ry"] for rg in row_geom]
+
+    # Draw the table grid
     draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_bottoms)
+
+    # ── Side-column text (Input, Output, Responsible, Doc, Measurement) ────
     for pi,pair in enumerate(paired_rows):
         rg=row_geom[pi]; ry,ROW_H=rg["ry"],rg["ROW_H"]
-        ref_idx=pair["left"] if pair["left"] is not None else pair["right"]; step=steps[ref_idx]
+        ref_idx = pair["left"] if pair["left"] is not None else pair["right"]
+        step = steps[ref_idx]
         for col_i,key in [(0,"input_label"),(2,"output_label"),(3,"responsible"),(4,"doc_format"),(5,"measurement")]:
             txt=(step.get(key) or "")
             if txt:
                 cw=XS[col_i+1]-XS[col_i]
-                draw_centered_text(c, txt, XS[col_i]+cw/2, ry+ROW_H/2, cw-4, font_size=6.5)
+                draw_centered_text(c, txt, XS[col_i]+cw/2, ry+ROW_H/2, cw-3, font_size=6)
+
+    # ── Build shape anchor positions ───────────────────────────────────────
     anchors={}
     for idx,step in enumerate(steps):
         pi=step_to_pair[idx]; rg=row_geom[pi]; ry,ROW_H=rg["ry"],rg["ROW_H"]
-        col=step.get("column","left"); sh_h=SHAPE_H.get(step["shape"],9*mm)
-        cx=RIGHT_CX if col=="right" else LEFT_CX; sh_w=SH_W_R if col=="right" else SH_W_L
-        sh_x=cx-sh_w/2; sh_bot=ry+V_PAD; sh_top=sh_bot+sh_h; sh_mid=sh_bot+sh_h/2
-        anchors[idx]={"cx":cx,"cy":sh_mid,"top":sh_top,"bot":sh_bot,
-                      "left":sh_x,"right":sh_x+sh_w,"sh_x":sh_x,"sh_w":sh_w,"sh_h":sh_h,"sh_bot":sh_bot,"col":col}
-    GREEN=colors.HexColor("#006600"); RED=colors.HexColor("#CC0000"); BLUE=colors.HexColor("#1a6dcc")
-    for idx,step in enumerate(steps):
-        a=anchors[idx]; col=a["col"]
-        # ── FIX: guard all string fields against None ──
-        connect_from  = (step.get("connect_from")  or "")
-        arrow_label   = (step.get("arrow_label")   or "").strip()
-        connect_side  = (step.get("connect_side")  or "bottom (default)")
-        loop_to       = (step.get("loop_to")       or "")
-        loop_label    = (step.get("loop_label")    or "").strip()
+        col=step.get("column","left")
+        sh_h=SHAPE_H_PDF.get(step["shape"],7*mm)
+        cx = RIGHT_CX if col=="right" else LEFT_CX
+        sh_w = SH_W_R  if col=="right" else SH_W_L
+        sh_x  = cx - sh_w/2
+        sh_bot = ry + V_PAD          # bottom-left y of shape (PDF y goes up)
+        sh_top = sh_bot + sh_h       # top of shape
+        sh_mid = sh_bot + sh_h/2
+        anchors[idx]={
+            "cx":cx, "cy":sh_mid,
+            "top":sh_top, "bot":sh_bot,
+            "left":sh_x, "right":sh_x+sh_w,
+            "sh_x":sh_x, "sh_w":sh_w, "sh_h":sh_h, "sh_bot":sh_bot,
+            "col":col
+        }
 
-        arr_color=GREEN if arrow_label.upper()=="YES" else (RED if arrow_label.upper()=="NO" else colors.black)
-        lbl_color=arr_color
+    GREEN = colors.HexColor("#006600")
+    RED   = colors.HexColor("#CC0000")
+    BLUE  = colors.HexColor("#1a6dcc")
+
+    # ── Draw arrows ───────────────────────────────────────────────────────
+    for idx,step in enumerate(steps):
+        a=anchors[idx]
+        connect_from = (step.get("connect_from") or "")
+        arrow_label  = (step.get("arrow_label")  or "").strip()
+        connect_side = (step.get("connect_side") or "bottom (default)")
+        loop_to      = (step.get("loop_to")      or "")
+        loop_label   = (step.get("loop_label")   or "").strip()
+
+        arr_color = GREEN if arrow_label.upper()=="YES" else (RED if arrow_label.upper()=="NO" else colors.black)
+        lbl_color = arr_color
+
         if str(connect_from)!="" and str(connect_from).isdigit():
             src_idx=int(connect_from)
             if 0<=src_idx<len(anchors):
                 s=anchors[src_idx]
                 if connect_side=="right side →":
-                    draw_elbow_arrow(c, s["right"], s["cy"], a["cx"], a["top"], color=arr_color, label=arrow_label, label_color=lbl_color)
+                    draw_elbow_arrow(c, s["right"], s["cy"], a["cx"], a["top"],
+                                     color=arr_color, label=arrow_label, label_color=lbl_color)
                 elif connect_side=="left side ←":
-                    draw_elbow_arrow(c, s["left"], s["cy"], a["cx"], a["top"], color=arr_color, label=arrow_label, label_color=lbl_color)
+                    draw_elbow_arrow(c, s["left"], s["cy"], a["cx"], a["top"],
+                                     color=arr_color, label=arrow_label, label_color=lbl_color)
                 else:
                     if abs(s["cx"]-a["cx"])<2:
                         draw_arrow_down(c, a["cx"], s["bot"], a["top"], color=arr_color)
                         if arrow_label:
-                            c.setFont("Helvetica-Bold",6); c.setFillColor(lbl_color)
-                            c.drawCentredString(a["cx"]+6,(s["bot"]+a["top"])/2,arrow_label); c.setFillColor(colors.black)
+                            c.setFont("Helvetica-Bold",5); c.setFillColor(lbl_color)
+                            c.drawCentredString(a["cx"]+5, (s["bot"]+a["top"])/2, arrow_label)
+                            c.setFillColor(colors.black)
                     else:
-                        draw_elbow_arrow(c, s["cx"], s["bot"], a["cx"], a["top"], color=arr_color, label=arrow_label, label_color=lbl_color)
+                        draw_elbow_arrow(c, s["cx"], s["bot"], a["cx"], a["top"],
+                                         color=arr_color, label=arrow_label, label_color=lbl_color)
         else:
             if idx>0:
                 prev_same=None
                 for pi in range(idx-1,-1,-1):
-                    if anchors[pi]["col"]==col: prev_same=pi; break
+                    if anchors[pi]["col"]==a["col"]: prev_same=pi; break
                 if prev_same is not None:
-                    ps=anchors[prev_same]; draw_arrow_down(c, a["cx"], ps["bot"], a["top"])
+                    ps=anchors[prev_same]
+                    draw_arrow_down(c, a["cx"], ps["bot"], a["top"])
+
+        # Loop-back arrow (left margin)
         if str(loop_to)!="" and str(loop_to).isdigit():
             lt_idx=int(loop_to)
             if 0<=lt_idx<len(anchors):
                 dest=anchors[lt_idx]
-                ll_color=GREEN if loop_label.upper()=="YES" else (RED if loop_label.upper()=="NO" else BLUE)
-                margin=FLOW_L-5*mm; c.setStrokeColor(ll_color); c.setLineWidth(0.8)
-                start_x=a["sh_x"]; start_y=a["cy"]; dest_x=dest["left"]; dest_y=dest["cy"]
-                c.line(start_x,start_y,margin,start_y); c.line(margin,start_y,margin,dest_y)
-                size=3.5; c.line(margin,dest_y,dest_x-size*1.5,dest_y); arrowhead(c,dest_x,dest_y,"right")
+                ll_color = GREEN if loop_label.upper()=="YES" else (RED if loop_label.upper()=="NO" else BLUE)
+                margin = FLOW_L - 4*mm
+                c.setStrokeColor(ll_color); c.setLineWidth(0.6)
+                start_x=a["sh_x"]; start_y=a["cy"]
+                dest_x=dest["left"]; dest_y=dest["cy"]
+                size=2.5
+                c.line(start_x,start_y,margin,start_y)
+                c.line(margin,start_y,margin,dest_y)
+                c.line(margin,dest_y,dest_x-size*1.5,dest_y)
+                arrowhead(c,dest_x,dest_y,"right")
                 if loop_label:
-                    c.setFont("Helvetica-Bold",6); c.setFillColor(ll_color)
-                    c.drawString(margin+2,(start_y+dest_y)/2+2,loop_label); c.setFillColor(colors.black)
+                    c.setFont("Helvetica-Bold",5); c.setFillColor(ll_color)
+                    c.drawString(margin+1,(start_y+dest_y)/2+1,loop_label)
+                    c.setFillColor(colors.black)
                 c.setStrokeColor(colors.black)
+
+    # ── Draw shapes (on top of arrows) ────────────────────────────────────
     for idx,step in enumerate(steps):
-        a=anchors[idx]; sh_x,sh_bot=a["sh_x"],a["sh_bot"]; sh_w,sh_h=a["sh_w"],a["sh_h"]; shape=step["shape"]
-        txt = (step.get("text") or "")
+        a=anchors[idx]
+        sh_x,sh_bot=a["sh_x"],a["sh_bot"]
+        sh_w,sh_h  =a["sh_w"],a["sh_h"]
+        shape=step["shape"]
+        txt     = (step.get("text")      or "")
         yes_lbl = (step.get("yes_label") or "YES")
         no_lbl  = (step.get("no_label")  or "NO")
-        if shape=="rect":            draw_rect_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
+
+        if   shape=="rect":          draw_rect_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
         elif shape=="oval":          draw_oval_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
+        elif shape=="parallelogram": draw_parallelogram_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
         elif shape=="diamond":
             draw_diamond_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
-            c.setFont("Helvetica-Bold",6.5); c.setFillColor(GREEN)
-            c.drawString(sh_x+sh_w+3, a["cy"]-3, f"{yes_lbl} →")
-            no_w=c.stringWidth(f"← {no_lbl}","Helvetica-Bold",6.5)
-            c.setFillColor(RED); c.drawString(sh_x-no_w-3, a["cy"]-3, f"← {no_lbl}"); c.setFillColor(colors.black)
-        elif shape=="parallelogram": draw_parallelogram_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
+            # YES label to the right, NO label to the left – exactly like screenshot
+            c.setFont("Helvetica-Bold",5.5); c.setFillColor(GREEN)
+            c.drawString(sh_x+sh_w+2, a["cy"]-2, f"{yes_lbl}")
+            no_w=c.stringWidth(f"{no_lbl}","Helvetica-Bold",5.5)
+            c.setFillColor(RED)
+            c.drawString(sh_x-no_w-2, a["cy"]-2, f"{no_lbl}")
+            c.setFillColor(colors.black)
         elif shape=="arrow_text":
-            c.setFont("Helvetica-Oblique",7); c.setFillColor(colors.HexColor("#333333"))
-            c.drawCentredString(a["cx"], a["cy"], txt); c.setFillColor(colors.black)
-    cur_y=table_bottom; cur_y-=4*mm; CR_TITLE_H=6*mm
-    c.setFillColor(colors.HexColor("#DDEEFF")); c.rect(ML,cur_y-CR_TITLE_H,TW,CR_TITLE_H,fill=1,stroke=1)
-    c.setFont("Helvetica-Bold",8); c.setFillColor(colors.black)
-    c.drawCentredString(ML+TW/2, cur_y-CR_TITLE_H+2, "SOP Change Record"); cur_y-=CR_TITLE_H
+            c.setFont("Helvetica-Oblique",6); c.setFillColor(colors.HexColor("#333333"))
+            c.drawCentredString(a["cx"], a["cy"], txt)
+            c.setFillColor(colors.black)
+
+    cur_y = table_bottom
+
+    # ── SOP CHANGE RECORD ─────────────────────────────────────────────────
+    cur_y -= 3*mm
+    CR_TITLE_H=5*mm
+    c.setFillColor(colors.HexColor("#DDEEFF"))
+    c.rect(ML,cur_y-CR_TITLE_H,TW,CR_TITLE_H,fill=1,stroke=1)
+    c.setFont("Helvetica-Bold",7); c.setFillColor(colors.black)
+    c.drawCentredString(ML+TW/2, cur_y-CR_TITLE_H+1.5, "SOP Change Record")
+    cur_y -= CR_TITLE_H
+
     CR_COLS=["S.No.","Effective\nDate","REV.\nNo.","Change Description",
              "Change Letter\n(Process:P / Doc:D / System:S)","Prepared By","Reviewed By","Approved By"]
-    CR_WIDTHS=[10*mm,20*mm,14*mm,52*mm,46*mm,22*mm,22*mm,0]; CR_WIDTHS[-1]=TW-sum(CR_WIDTHS[:-1])
+    CR_WIDTHS=[9*mm,18*mm,12*mm,50*mm,44*mm,21*mm,21*mm,0]
+    CR_WIDTHS[-1]=TW-sum(CR_WIDTHS[:-1])
     CR_XS=[ML]
     for w in CR_WIDTHS: CR_XS.append(CR_XS[-1]+w)
-    CR_HDR_H=8*mm
+
+    CR_HDR_H=7*mm
     for i,label in enumerate(CR_COLS):
-        cw=CR_XS[i+1]-CR_XS[i]; c.setFillColor(colors.HexColor("#EEF3FF"))
-        c.rect(CR_XS[i],cur_y-CR_HDR_H,cw,CR_HDR_H,fill=1,stroke=1); c.setFillColor(colors.black)
-        lines=label.split("\n"); lh=6; sy=cur_y-CR_HDR_H/2+(len(lines)-1)*lh/2
+        cw=CR_XS[i+1]-CR_XS[i]
+        c.setFillColor(colors.HexColor("#EEF3FF"))
+        c.rect(CR_XS[i],cur_y-CR_HDR_H,cw,CR_HDR_H,fill=1,stroke=1)
+        c.setFillColor(colors.black)
+        lines=label.split("\n"); lh=5.5; sy=cur_y-CR_HDR_H/2+(len(lines)-1)*lh/2
         for li,ln in enumerate(lines):
-            c.setFont("Helvetica-Bold",5.5); c.drawCentredString(CR_XS[i]+cw/2, sy-li*(lh+0.5), ln)
-    cur_y-=CR_HDR_H; CR_ROW_H=6*mm
+            c.setFont("Helvetica-Bold",5); c.drawCentredString(CR_XS[i]+cw/2, sy-li*(lh+0.3), ln)
+    cur_y -= CR_HDR_H
+
+    CR_ROW_H=5.5*mm
     for row in meta.get("change_records",[]):
         vals=[row.get("sno",""),row.get("date",""),row.get("rev",""),row.get("desc",""),
               row.get("change_letter",""),row.get("prepared",""),row.get("reviewed",""),row.get("approved","")]
         for i,val in enumerate(vals):
-            cw=CR_XS[i+1]-CR_XS[i]; c.setFillColor(colors.white)
+            cw=CR_XS[i+1]-CR_XS[i]
+            c.setFillColor(colors.white)
             c.rect(CR_XS[i],cur_y-CR_ROW_H,cw,CR_ROW_H,fill=1,stroke=1)
-            draw_centered_text(c, val, CR_XS[i]+cw/2, cur_y-CR_ROW_H/2, cw-3, font_size=6)
-        cur_y-=CR_ROW_H
-    c.setFont("Helvetica-Oblique",6); c.setFillColor(colors.HexColor("#555555"))
-    c.drawCentredString(ML+TW/2, cur_y-5, f"Composed By: {meta['composed_by']}")
+            draw_centered_text(c, val, CR_XS[i]+cw/2, cur_y-CR_ROW_H/2, cw-2, font_size=5.5)
+        cur_y -= CR_ROW_H
+
+    # Add 2 empty rows for future entries
+    for _ in range(2):
+        for i in range(len(CR_COLS)):
+            cw=CR_XS[i+1]-CR_XS[i]
+            c.setFillColor(colors.white)
+            c.rect(CR_XS[i],cur_y-CR_ROW_H,cw,CR_ROW_H,fill=1,stroke=1)
+        cur_y -= CR_ROW_H
+
+    # Composed By footer
+    cur_y -= 2*mm
+    c.setFont("Helvetica-Oblique",5.5); c.setFillColor(colors.HexColor("#555555"))
+    c.drawCentredString(ML+TW/2, cur_y, f"Composed By: {meta['composed_by']}")
+
     c.save(); buf.seek(0); return buf
+
 
 # ─── Streamlit UI ─────────────────────────────────────────────────────────────
 st.markdown("""
