@@ -11,7 +11,6 @@ from reportlab.lib.units import mm
 
 st.set_page_config(page_title="SOP Builder", layout="wide")
 
-# ─── Sidebar API Key ──────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("🔑 API Configuration")
     api_key = st.text_input(
@@ -27,7 +26,6 @@ with st.sidebar:
         st.warning("Enter your Google Gemini API key to use AI generation.")
     st.markdown("[Get a free Gemini API key →](https://aistudio.google.com/app/apikey)", unsafe_allow_html=False)
 
-# ─── Session State ────────────────────────────────────────────────────────────
 defaults = {
     "steps": [],
     "sop_no": "SCM/STR/LS/02",
@@ -155,7 +153,7 @@ def generate_steps_with_ai(description: str):
                 if is_retryable and attempt < max_retries - 1:
                     wait = wait_seconds[attempt]
                     st.warning(f"\u23f3 {model_name} is busy (attempt {attempt+1}/{max_retries}). Retrying in {wait}s...")
-                    time.sleep(wait)
+                    import time as t; t.sleep(wait)
                 else:
                     break
         if response is not None:
@@ -248,7 +246,7 @@ def generate_svg_preview(steps):
                 cur = w
         if cur: lines.append(cur)
         return lines or [""]
-    def text_lines_svg(lines, cx, mid_y, font_size=11, bold=False, fill="#1a1a1a"):
+    def text_lines_svg(lines, cx, mid_y, font_size=13, bold=False, fill="#1a1a1a"):
         lh = font_size+3; total = len(lines)*lh; y0 = mid_y-total/2+lh*0.75
         weight = "600" if bold else "400"; out = ""
         for i, line in enumerate(lines):
@@ -299,7 +297,7 @@ def generate_svg_preview(steps):
                 if lbl:
                     mx=(sx+ex)/2; my=(sy+ey)/2-4
                     arrow_svg += f'<rect x="{mx-18}" y="{my-9}" width="36" height="13" rx="3" fill="white" stroke="{ac}" stroke-width="0.6" opacity="0.92"/>'
-                    arrow_svg += f'<text x="{mx}" y="{my+1}" text-anchor="middle" font-size="9" font-weight="700" fill="{ac}" font-family="\'Segoe UI\',sans-serif">{esc(lbl)}</text>'
+                    arrow_svg += f'<text x="{mx}" y="{my+1}" text-anchor="middle" font-size="11" font-weight="700" fill="{ac}" font-family="\'Segoe UI\',sans-serif">{esc(lbl)}</text>'
         else:
             if idx > 0:
                 prev = None
@@ -320,7 +318,7 @@ def generate_svg_preview(steps):
                 arrow_svg += f'<path d="{arrowhead_d(dest["left"],dest["cy"],"right")}" fill="{lc}"/>'
                 if loop_label:
                     my=(a["cy"]+dest["cy"])/2
-                    arrow_svg += f'<text x="{lx-4}" y="{my}" text-anchor="end" font-size="9" font-weight="700" fill="{lc}" font-family="\'Segoe UI\',sans-serif">{esc(loop_label)}</text>'
+                    arrow_svg += f'<text x="{lx-4}" y="{my}" text-anchor="end" font-size="11" font-weight="700" fill="{lc}" font-family="\'Segoe UI\',sans-serif">{esc(loop_label)}</text>'
 
     COLORS = {
         "rect":          {"fill":"#EBF4FF","stroke":"#2B6CB0","text":"#1A365D"},
@@ -339,32 +337,32 @@ def generate_svg_preview(steps):
         shape_svg += '<g>'
         if shape=="rect":
             shape_svg += f'<rect x="{x0}" y="{y0}" width="{bw}" height="{bh}" rx="8" fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
-            shape_svg += text_lines_svg(lines, cx, cy, 11, fill=clr["text"])
+            shape_svg += text_lines_svg(lines, cx, cy, 13, fill=clr["text"])
         elif shape=="oval":
             shape_svg += f'<ellipse cx="{cx}" cy="{cy}" rx="{bw/2}" ry="{bh/2}" fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
-            shape_svg += text_lines_svg(lines, cx, cy, 11, fill=clr["text"])
+            shape_svg += text_lines_svg(lines, cx, cy, 13, fill=clr["text"])
         elif shape=="diamond":
             pts=f"{cx},{y0} {cx+bw/2},{cy} {cx},{y0+bh} {cx-bw/2},{cy}"
             shape_svg += f'<polygon points="{pts}" fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
-            shape_svg += text_lines_svg(lines, cx, cy, 10, fill=clr["text"])
-            shape_svg += f'<text x="{cx+bw/2+6}" y="{cy+4}" font-size="9" font-weight="700" fill="{YES_COLOR}" font-family="\'Segoe UI\',sans-serif">{esc(yes_lbl)} →</text>'
-            shape_svg += f'<text x="{cx-bw/2-6}" y="{cy+4}" font-size="9" font-weight="700" text-anchor="end" fill="{NO_COLOR}" font-family="\'Segoe UI\',sans-serif">← {esc(no_lbl)}</text>'
+            shape_svg += text_lines_svg(lines, cx, cy, 12, fill=clr["text"])
+            shape_svg += f'<text x="{cx+bw/2+6}" y="{cy+4}" font-size="11" font-weight="700" fill="{YES_COLOR}" font-family="\'Segoe UI\',sans-serif">{esc(yes_lbl)} →</text>'
+            shape_svg += f'<text x="{cx-bw/2-6}" y="{cy+4}" font-size="11" font-weight="700" text-anchor="end" fill="{NO_COLOR}" font-family="\'Segoe UI\',sans-serif">← {esc(no_lbl)}</text>'
         elif shape=="parallelogram":
             skew=10; pts=f"{x0+skew},{y0} {x0+bw},{y0} {x0+bw-skew},{y0+bh} {x0},{y0+bh}"
             shape_svg += f'<polygon points="{pts}" fill="{clr["fill"]}" stroke="{clr["stroke"]}" stroke-width="1.5"/>'
-            shape_svg += text_lines_svg(lines, cx, cy, 11, fill=clr["text"])
+            shape_svg += text_lines_svg(lines, cx, cy, 13, fill=clr["text"])
         elif shape=="arrow_text":
-            shape_svg += f'<text x="{cx}" y="{cy+4}" text-anchor="middle" font-size="11" fill="{clr["text"]}" font-style="italic" font-family="\'Segoe UI\',sans-serif">{esc(step.get("text",""))}</text>'
+            shape_svg += f'<text x="{cx}" y="{cy+4}" text-anchor="middle" font-size="13" fill="{clr["text"]}" font-style="italic" font-family="\'Segoe UI\',sans-serif">{esc(step.get("text",""))}</text>'
         shape_svg += f'<circle cx="{x0+12}" cy="{y0+12}" r="9" fill="{clr["stroke"]}" opacity="0.9"/>'
         shape_svg += f'<text x="{x0+12}" y="{y0+16}" text-anchor="middle" font-size="9" font-weight="700" fill="white" font-family="\'Segoe UI\',sans-serif">{idx+1}</text>'
         shape_svg += '</g>'
 
     has_right = any(s.get("column","left")=="right" for s in steps)
     header_svg  = f'<rect x="30" y="6" width="{BOX_W_L+40}" height="22" rx="5" fill="#EBF4FF" stroke="#2B6CB0" stroke-width="0.8"/>'
-    header_svg += f'<text x="{COL_L_CX}" y="21" text-anchor="middle" font-size="11" font-weight="600" fill="#1A365D" font-family="\'Segoe UI\',sans-serif">Main Flow (Left)</text>'
+    header_svg += f'<text x="{COL_L_CX}" y="21" text-anchor="middle" font-size="13" font-weight="600" fill="#1A365D" font-family="\'Segoe UI\',sans-serif">Main Flow (Left)</text>'
     if has_right:
         header_svg += f'<rect x="{COL_R_CX-BOX_W_R/2-20}" y="6" width="{BOX_W_R+40}" height="22" rx="5" fill="#F0FFF4" stroke="#276749" stroke-width="0.8"/>'
-        header_svg += f'<text x="{COL_R_CX}" y="21" text-anchor="middle" font-size="11" font-weight="600" fill="#1C4532" font-family="\'Segoe UI\',sans-serif">Branch (Right)</text>'
+        header_svg += f'<text x="{COL_R_CX}" y="21" text-anchor="middle" font-size="13" font-weight="600" fill="#1C4532" font-family="\'Segoe UI\',sans-serif">Branch (Right)</text>'
     divider_svg = ""
     if has_right:
         mid_x=(COL_L_CX+BOX_W_L/2+COL_R_CX-BOX_W_R/2)/2
@@ -374,7 +372,7 @@ def generate_svg_preview(steps):
     legend_items=[("rect","#EBF4FF","#2B6CB0","Process"),("oval","#2D3748","#1A202C","Terminator"),
                   ("diamond","#FFF9E6","#B7791F","Decision"),("parallelogram","#F0FFF4","#276749","Input/Output")]
     legend_svg=f'<rect x="{legend_x-8}" y="{legend_y-8}" width="126" height="{len(legend_items)*22+16}" rx="8" fill="white" stroke="#CBD5E0" stroke-width="0.8" opacity="0.95"/>'
-    legend_svg+=f'<text x="{legend_x+4}" y="{legend_y+6}" font-size="10" font-weight="600" fill="#4A5568" font-family="\'Segoe UI\',sans-serif">Legend</text>'
+    legend_svg+=f'<text x="{legend_x+4}" y="{legend_y+6}" font-size="12" font-weight="600" fill="#4A5568" font-family="\'Segoe UI\',sans-serif">Legend</text>'
     for i,(sh,fill,stroke,label) in enumerate(legend_items):
         ly=legend_y+20+i*22; lx=legend_x+4
         if sh in ("rect","parallelogram"):
@@ -383,7 +381,7 @@ def generate_svg_preview(steps):
             legend_svg+=f'<ellipse cx="{lx+10}" cy="{ly}" rx="10" ry="7" fill="{fill}" stroke="{stroke}" stroke-width="1"/>'
         elif sh=="diamond":
             legend_svg+=f'<polygon points="{lx+10},{ly-8} {lx+20},{ly} {lx+10},{ly+8} {lx},{ly}" fill="{fill}" stroke="{stroke}" stroke-width="1"/>'
-        legend_svg+=f'<text x="{lx+26}" y="{ly+4}" font-size="10" fill="#4A5568" font-family="\'Segoe UI\',sans-serif">{label}</text>'
+        legend_svg+=f'<text x="{lx+26}" y="{ly+4}" font-size="12" fill="#4A5568" font-family="\'Segoe UI\',sans-serif">{label}</text>'
 
     return f"""
     <svg width="{SVG_W}" height="{SVG_H}" viewBox="0 0 {SVG_W} {SVG_H}" xmlns="http://www.w3.org/2000/svg">
@@ -404,16 +402,16 @@ def render_preview_html(steps):
   *{{box-sizing:border-box;margin:0;padding:0}}
   body{{background:#F7F9FC;font-family:'Segoe UI',sans-serif;overflow:hidden}}
   #toolbar{{display:flex;align-items:center;gap:10px;padding:8px 14px;background:white;
-    border-bottom:1px solid #E2E8F0;font-size:12px;color:#4A5568}}
-  #toolbar strong{{color:#1A365D;font-size:13px}}
+    border-bottom:1px solid #E2E8F0;font-size:13px;color:#4A5568}}
+  #toolbar strong{{color:#1A365D;font-size:14px}}
   #zoom-controls{{display:flex;gap:4px;align-items:center;margin-left:auto}}
   .zbtn{{background:#EBF4FF;border:1px solid #BEE3F8;color:#2B6CB0;border-radius:5px;
     padding:3px 9px;cursor:pointer;font-size:13px;font-weight:600;line-height:1.4}}
   .zbtn:hover{{background:#BEE3F8}}
-  #zoom-label{{font-size:11px;color:#718096;min-width:38px;text-align:center}}
+  #zoom-label{{font-size:12px;color:#718096;min-width:38px;text-align:center}}
   #canvas-wrap{{width:100%;height:calc(100vh - 44px);overflow:auto;background:#F7F9FC}}
   #svg-inner{{display:inline-block;transform-origin:top left;transition:transform 0.18s ease;padding:10px}}
-  .badge{{background:#2B6CB0;color:white;border-radius:12px;padding:2px 10px;font-size:11px;font-weight:600;margin-left:6px}}
+  .badge{{background:#2B6CB0;color:white;border-radius:12px;padding:2px 10px;font-size:12px;font-weight:600;margin-left:6px}}
 </style></head><body>
 <div id="toolbar">
   <strong>📊 Live Flowchart Preview</strong>
@@ -423,7 +421,7 @@ def render_preview_html(steps):
     <button class="zbtn" onclick="zoom(-0.15)">−</button>
     <span id="zoom-label">100%</span>
     <button class="zbtn" onclick="zoom(+0.15)">+</button>
-    <button class="zbtn" onclick="resetZoom()" style="font-size:11px;padding:3px 8px">Reset</button>
+    <button class="zbtn" onclick="resetZoom()" style="font-size:12px;padding:3px 8px">Reset</button>
   </div>
 </div>
 <div id="canvas-wrap"><div id="svg-inner">{svg}</div></div>
@@ -448,15 +446,15 @@ def wrapped_lines(c, text, max_w, font_name, font_size):
     if cur: lines.append(cur)
     return lines if lines else [""]
 
-def draw_centered_text(c, text, cx, cy, max_w, font_name="Helvetica", font_size=7, color=colors.black):
+def draw_centered_text(c, text, cx, cy, max_w, font_name="Helvetica", font_size=9, color=colors.black):
     lines=wrapped_lines(c, text, max_w, font_name, font_size)
-    line_h=font_size+1.5; total_h=len(lines)*line_h; start_y=cy+total_h/2-line_h*0.7
+    line_h=font_size+2; total_h=len(lines)*line_h; start_y=cy+total_h/2-line_h*0.75
     c.setFont(font_name, font_size); c.setFillColor(color)
     for i, line in enumerate(lines): c.drawCentredString(cx, start_y-i*line_h, line)
 
-def draw_left_text(c, text, x, cy, max_w, font_name="Helvetica", font_size=6.5, color=colors.black):
+def draw_left_text(c, text, x, cy, max_w, font_name="Helvetica", font_size=9, color=colors.black):
     lines=wrapped_lines(c, text, max_w, font_name, font_size)
-    line_h=font_size+1.5; total_h=len(lines)*line_h; start_y=cy+total_h/2-line_h*0.7
+    line_h=font_size+2; total_h=len(lines)*line_h; start_y=cy+total_h/2-line_h*0.75
     c.setFont(font_name, font_size); c.setFillColor(color)
     for i, line in enumerate(lines): c.drawString(x, start_y-i*line_h, line)
 
@@ -482,28 +480,28 @@ def draw_elbow_arrow(c, sx, sy, ex, ey, color=colors.black, label="", label_colo
     if ey<sy: c.line(ex, sy, ex, ey+size*1.5); arrowhead(c, ex, ey, "down")
     else:     c.line(ex, sy, ex, ey-size*1.5); arrowhead(c, ex, ey, "up")
     if label:
-        c.setFont("Helvetica-Bold",5); c.setFillColor(label_color)
+        c.setFont("Helvetica-Bold",7); c.setFillColor(label_color)
         c.drawCentredString((sx+ex)/2, sy+2, label)
     c.setStrokeColor(colors.black); c.setFillColor(colors.black)
 
-def draw_rect_shape(c, x, y, w, h, text, font_size=6.5):
+def draw_rect_shape(c, x, y, w, h, text, font_size=8.5):
     c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.6)
     c.rect(x, y, w, h, fill=1, stroke=1)
     draw_centered_text(c, text, x+w/2, y+h/2, w-3, font_size=font_size)
 
-def draw_oval_shape(c, x, y, w, h, text, font_size=6.5):
+def draw_oval_shape(c, x, y, w, h, text, font_size=8.5):
     c.setStrokeColor(colors.black); c.setFillColor(colors.HexColor("#2c2c2c")); c.setLineWidth(0.6)
     c.ellipse(x, y, x+w, y+h, fill=1, stroke=1)
     draw_centered_text(c, text, x+w/2, y+h/2, w-4, font_size=font_size, color=colors.white)
 
-def draw_diamond_shape(c, x, y, w, h, text, font_size=6):
+def draw_diamond_shape(c, x, y, w, h, text, font_size=8):
     cx,cy=x+w/2,y+h/2; p=c.beginPath()
     p.moveTo(cx,y+h); p.lineTo(x+w,cy); p.lineTo(cx,y); p.lineTo(x,cy); p.close()
     c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.6)
     c.drawPath(p, fill=1, stroke=1)
     draw_centered_text(c, text, cx, cy, w*0.5, font_size=font_size)
 
-def draw_parallelogram_shape(c, x, y, w, h, text, font_size=6.5):
+def draw_parallelogram_shape(c, x, y, w, h, text, font_size=8.5):
     skew=5; p=c.beginPath()
     p.moveTo(x+skew,y+h); p.lineTo(x+w,y+h); p.lineTo(x+w-skew,y); p.lineTo(x,y); p.close()
     c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.6)
@@ -533,41 +531,43 @@ def generate_pdf(steps, meta):
     cur_y=PH-MT
 
     # ── HEADER ────────────────────────────────────────────────────────────────
-    HEADER_H=20*mm
-    left_w=42*mm; right_w=76*mm; centre_w=TW-left_w-right_w
+    # Increased header height to prevent overlapping
+    HEADER_H=28*mm
+    left_w=48*mm; right_w=90*mm; centre_w=TW-left_w-right_w
 
-    # Outer header border
     c.setStrokeColor(colors.black); c.setLineWidth(0.8)
     c.rect(ML, cur_y-HEADER_H, TW, HEADER_H, fill=0, stroke=1)
 
-    # Left cell – company name + logo text
+    # Left cell – company name
     c.setStrokeColor(colors.black); c.setLineWidth(0.5)
     c.line(ML+left_w, cur_y-HEADER_H, ML+left_w, cur_y)
 
-    c.setFont("Helvetica-Bold", 9); c.setFillColor(colors.black)
-    c.drawString(ML+2, cur_y-7, meta["company_name"])
-    c.setFont("Helvetica-Bold", 9); c.setFillColor(colors.HexColor("#1a6dcc"))
-    c.drawString(ML+2, cur_y-15, "eka")
+    c.setFont("Helvetica-Bold", 11); c.setFillColor(colors.black)
+    c.drawString(ML+3, cur_y-9, meta["company_name"])
+    c.setFont("Helvetica-Bold", 11); c.setFillColor(colors.HexColor("#1a6dcc"))
+    c.drawString(ML+3, cur_y-19, "eka")
     c.setFillColor(colors.black)
 
-    # Centre cell – title
+    # Centre cell – title block
     c.line(ML+left_w+centre_w, cur_y-HEADER_H, ML+left_w+centre_w, cur_y)
     cx_title = ML+left_w+centre_w/2
-    c.setFont("Helvetica-Bold", 11); c.setFillColor(colors.black)
-    c.drawCentredString(cx_title, cur_y-7, "STANDARD OPERATING PROCEDURE")
-    draw_centered_text(c, meta["title"], cx_title, cur_y-15, centre_w-4, font_size=7.5)
+    c.setFont("Helvetica-Bold", 13); c.setFillColor(colors.black)
+    c.drawCentredString(cx_title, cur_y-9, "STANDARD OPERATING PROCEDURE")
+    draw_centered_text(c, meta["title"], cx_title, cur_y-20, centre_w-6, font_size=9.5)
 
-    # Right cell – meta grid (4 rows x 4 cols)
+    # Right cell – meta grid: 4 rows × 4 cols
+    # Each cell needs enough height: HEADER_H / 4 rows
     RX = ML+left_w+centre_w
-    c1w=16*mm; c2w=22*mm; c3w=10*mm; c4w=right_w-c1w-c2w-c3w
-    rh = HEADER_H/4
+    # Column widths in the right meta block
+    c1w=20*mm; c2w=26*mm; c3w=14*mm; c4w=right_w-c1w-c2w-c3w
+    rh = HEADER_H/4   # height per row — now 7mm each with HEADER_H=28mm
+
     meta_rows=[
         ("SOP No.", meta["sop_no"], "Page", meta["page_info"]),
         ("Rev No.", meta["rev_no"], "Date", meta["date"]),
         ("Unit",    meta["unit"],   "Area", meta["area"]),
         ("Sub Area",meta["sub_area"],"Zone",meta["zone"]),
     ]
-    col_widths=[c1w,c2w,c3w,c4w]
     for ri,(l1,v1,l2,v2) in enumerate(meta_rows):
         ry=cur_y-(ri+1)*rh
         rxs=[RX, RX+c1w, RX+c1w+c2w, RX+c1w+c2w+c3w, RX+right_w]
@@ -576,41 +576,41 @@ def generate_pdf(steps, meta):
             c.setFillColor(colors.HexColor("#EEF3FF") if is_lbl else colors.white)
             c.setStrokeColor(colors.black); c.setLineWidth(0.4)
             c.rect(rxs[ci],ry,cw,rh,fill=1,stroke=1); c.setFillColor(colors.black)
-            fn="Helvetica-Bold" if is_lbl else "Helvetica"; fs=5.5 if is_lbl else 6
-            draw_left_text(c, txt, rxs[ci]+1.5, ry+rh/2, cw-3, fn, fs)
+            fn="Helvetica-Bold" if is_lbl else "Helvetica"
+            fs=7.5 if is_lbl else 8
+            draw_left_text(c, txt, rxs[ci]+2, ry+rh/2, cw-4, fn, fs)
 
     cur_y -= HEADER_H
 
     # ── PURPOSE / SCOPE ────────────────────────────────────────────────────────
-    PS_H=7*mm
-    PL_W=16*mm; PV_W=76*mm; SL_W=13*mm; SV_W=TW-PL_W-PV_W-SL_W
+    PS_H=9*mm
+    PL_W=18*mm; PV_W=80*mm; SL_W=15*mm; SV_W=TW-PL_W-PV_W-SL_W
     c.setLineWidth(0.5)
     for x,w,txt,bold,centre in [
-        (ML,       PL_W,"Purpose",True, False),
-        (ML+PL_W,  PV_W,meta["purpose"],False,False),
-        (ML+PL_W+PV_W, SL_W,"Scope",True, False),
-        (ML+PL_W+PV_W+SL_W, SV_W,meta["scope"],False,True)
+        (ML,           PL_W, "Purpose",        True,  False),
+        (ML+PL_W,      PV_W, meta["purpose"],   False, False),
+        (ML+PL_W+PV_W, SL_W, "Scope",          True,  False),
+        (ML+PL_W+PV_W+SL_W, SV_W, meta["scope"], False, True)
     ]:
         c.setFillColor(colors.white)
         c.rect(x,cur_y-PS_H,w,PS_H,fill=1,stroke=1)
         c.setFillColor(colors.black)
         if bold:
-            c.setFont("Helvetica-Bold",7); c.drawString(x+2, cur_y-PS_H+2, txt)
+            c.setFont("Helvetica-Bold",9); c.drawString(x+2, cur_y-PS_H+3, txt)
         elif centre:
-            draw_centered_text(c, txt, x+w/2, cur_y-PS_H/2, w-4, font_size=6)
+            draw_centered_text(c, txt, x+w/2, cur_y-PS_H/2, w-4, font_size=8)
         else:
-            draw_left_text(c, txt, x+2, cur_y-PS_H/2, w-4, font_size=7)
+            draw_left_text(c, txt, x+2, cur_y-PS_H/2, w-4, font_size=8.5)
     cur_y -= PS_H
 
     # ── TABLE COLUMNS ─────────────────────────────────────────────────────────
-    # Match screenshot: Input | Process Flow | Output | Responsible | Doc.Format | Measurement
     COL_IN   = 22*mm
     COL_OUT  = 20*mm
     COL_RESP = 25*mm
     COL_DOC  = 22*mm
     COL_MEAS = 24*mm
     COL_FLOW = TW - COL_IN - COL_OUT - COL_RESP - COL_DOC - COL_MEAS
-    FLOW_COL_IDX = 1   # flow column is index 1 in XS array
+    FLOW_COL_IDX = 1
 
     XS=[ML,
         ML+COL_IN,
@@ -623,53 +623,49 @@ def generate_pdf(steps, meta):
     FLOW_L  = XS[1]
     FLOW_W  = COL_FLOW
 
-    # Two sub-columns inside flow: left(main) and right(branch)
-    # Match screenshot: main flow slightly left of centre, branch to the right
-    LEFT_FRAC  = 0.32   # centre of left sub-col as fraction of FLOW_W
+    LEFT_FRAC  = 0.32
     RIGHT_FRAC = 0.72
     LEFT_CX  = FLOW_L + FLOW_W * LEFT_FRAC
     RIGHT_CX = FLOW_L + FLOW_W * RIGHT_FRAC
 
-    # Shape widths – compact, like the screenshot
-    SH_W_L = FLOW_W * 0.38   # main flow shape width
-    SH_W_R = FLOW_W * 0.34   # branch shape width
+    SH_W_L = FLOW_W * 0.38
+    SH_W_R = FLOW_W * 0.34
 
     # ── "Process Steps:" header bar ────────────────────────────────────────
-    HDR1_H=6*mm
+    HDR1_H=7*mm
     c.setFillColor(colors.HexColor("#DDEEFF"))
     c.rect(ML,cur_y-HDR1_H,TW,HDR1_H,fill=1,stroke=1)
-    c.setFont("Helvetica-Bold",8); c.setFillColor(colors.black)
-    c.drawString(ML+2, cur_y-HDR1_H+2, "Process Steps:")
-    c.drawString(XS[3]+2, cur_y-HDR1_H+2, f"OWNER :   {meta['owner']}")
+    c.setFont("Helvetica-Bold",10); c.setFillColor(colors.black)
+    c.drawString(ML+2, cur_y-HDR1_H+2.5, "Process Steps:")
+    c.drawString(XS[3]+2, cur_y-HDR1_H+2.5, f"OWNER :   {meta['owner']}")
     cur_y -= HDR1_H
 
     # ── Column header row ──────────────────────────────────────────────────
-    HDR2_H=6*mm
+    HDR2_H=8*mm
     col_labels=["Input","Process Flow","Output","Responsible","Doc. Format /\nSystem","Effective\nMeasurement"]
     for i,label in enumerate(col_labels):
         cw=XS[i+1]-XS[i]
         c.setFillColor(colors.HexColor("#EEF3FF"))
         c.rect(XS[i],cur_y-HDR2_H,cw,HDR2_H,fill=1,stroke=1)
         c.setFillColor(colors.black)
-        lines=label.split("\n"); lh=5.5; sy=cur_y-HDR2_H/2+(len(lines)-1)*lh/2
+        lines=label.split("\n"); lh=7; sy=cur_y-HDR2_H/2+(len(lines)-1)*lh/2
         for li,ln in enumerate(lines):
-            c.setFont("Helvetica-Bold",5.5); c.drawCentredString(XS[i]+cw/2, sy-li*(lh+0.3), ln)
+            c.setFont("Helvetica-Bold",7); c.drawCentredString(XS[i]+cw/2, sy-li*(lh+0.3), ln)
     cur_y -= HDR2_H
 
-    # ── Shape sizes (compact – matching screenshot) ─────────────────────────
-    # rect/oval/parallelogram ≈ 8mm tall, diamond ≈ 13mm tall, arrow_text ≈ 5mm
+    # ── Shape sizes ─────────────────────────────────────────────────────────
     SHAPE_H_PDF = {
-        "rect":          7*mm,
-        "oval":          7*mm,
-        "parallelogram": 7*mm,
-        "diamond":       13*mm,
-        "arrow_text":    5*mm,
+        "rect":          9*mm,
+        "oval":          9*mm,
+        "parallelogram": 9*mm,
+        "diamond":       15*mm,
+        "arrow_text":    6*mm,
     }
-    V_PAD = 3*mm   # vertical padding above/below shape within row
+    V_PAD = 3*mm
 
     table_top = cur_y
 
-    # ── Build paired rows (same as SVG logic) ─────────────────────────────
+    # ── Build paired rows ─────────────────────────────────────────────────
     paired_rows=[]; step_to_pair={}
     for idx,step in enumerate(steps):
         col=step.get("column","left")
@@ -683,11 +679,10 @@ def generate_pdf(steps, meta):
         else:
             paired_rows.append({"left":idx,"right":None}); step_to_pair[idx]=len(paired_rows)-1
 
-    # Calculate row geometries (y positions in PDF, going downward from cur_y)
     row_geom=[]; scan_y=cur_y
     for pair in paired_rows:
-        h_left  = SHAPE_H_PDF.get(steps[pair["left"]]["shape"],  7*mm) if pair["left"]  is not None else 0
-        h_right = SHAPE_H_PDF.get(steps[pair["right"]]["shape"], 7*mm) if pair["right"] is not None else 0
+        h_left  = SHAPE_H_PDF.get(steps[pair["left"]]["shape"],  9*mm) if pair["left"]  is not None else 0
+        h_right = SHAPE_H_PDF.get(steps[pair["right"]]["shape"], 9*mm) if pair["right"] is not None else 0
         ROW_H = max(h_left, h_right) + 2*V_PAD
         ry = scan_y - ROW_H
         row_geom.append({"ry":ry, "ROW_H":ROW_H})
@@ -696,10 +691,9 @@ def generate_pdf(steps, meta):
     table_bottom = scan_y
     row_bottoms  = [rg["ry"] for rg in row_geom]
 
-    # Draw the table grid
     draw_table_structure(c, XS, FLOW_COL_IDX, table_top, table_bottom, row_bottoms)
 
-    # ── Side-column text (Input, Output, Responsible, Doc, Measurement) ────
+    # ── Side-column text ────────────────────────────────────────────────────
     for pi,pair in enumerate(paired_rows):
         rg=row_geom[pi]; ry,ROW_H=rg["ry"],rg["ROW_H"]
         ref_idx = pair["left"] if pair["left"] is not None else pair["right"]
@@ -708,19 +702,19 @@ def generate_pdf(steps, meta):
             txt=(step.get(key) or "")
             if txt:
                 cw=XS[col_i+1]-XS[col_i]
-                draw_centered_text(c, txt, XS[col_i]+cw/2, ry+ROW_H/2, cw-3, font_size=6)
+                draw_centered_text(c, txt, XS[col_i]+cw/2, ry+ROW_H/2, cw-3, font_size=8)
 
-    # ── Build shape anchor positions ───────────────────────────────────────
+    # ── Shape anchor positions ─────────────────────────────────────────────
     anchors={}
     for idx,step in enumerate(steps):
         pi=step_to_pair[idx]; rg=row_geom[pi]; ry,ROW_H=rg["ry"],rg["ROW_H"]
         col=step.get("column","left")
-        sh_h=SHAPE_H_PDF.get(step["shape"],7*mm)
+        sh_h=SHAPE_H_PDF.get(step["shape"],9*mm)
         cx = RIGHT_CX if col=="right" else LEFT_CX
         sh_w = SH_W_R  if col=="right" else SH_W_L
         sh_x  = cx - sh_w/2
-        sh_bot = ry + V_PAD          # bottom-left y of shape (PDF y goes up)
-        sh_top = sh_bot + sh_h       # top of shape
+        sh_bot = ry + V_PAD
+        sh_top = sh_bot + sh_h
         sh_mid = sh_bot + sh_h/2
         anchors[idx]={
             "cx":cx, "cy":sh_mid,
@@ -760,7 +754,7 @@ def generate_pdf(steps, meta):
                     if abs(s["cx"]-a["cx"])<2:
                         draw_arrow_down(c, a["cx"], s["bot"], a["top"], color=arr_color)
                         if arrow_label:
-                            c.setFont("Helvetica-Bold",5); c.setFillColor(lbl_color)
+                            c.setFont("Helvetica-Bold",7); c.setFillColor(lbl_color)
                             c.drawCentredString(a["cx"]+5, (s["bot"]+a["top"])/2, arrow_label)
                             c.setFillColor(colors.black)
                     else:
@@ -775,7 +769,6 @@ def generate_pdf(steps, meta):
                     ps=anchors[prev_same]
                     draw_arrow_down(c, a["cx"], ps["bot"], a["top"])
 
-        # Loop-back arrow (left margin)
         if str(loop_to)!="" and str(loop_to).isdigit():
             lt_idx=int(loop_to)
             if 0<=lt_idx<len(anchors):
@@ -791,12 +784,12 @@ def generate_pdf(steps, meta):
                 c.line(margin,dest_y,dest_x-size*1.5,dest_y)
                 arrowhead(c,dest_x,dest_y,"right")
                 if loop_label:
-                    c.setFont("Helvetica-Bold",5); c.setFillColor(ll_color)
+                    c.setFont("Helvetica-Bold",6); c.setFillColor(ll_color)
                     c.drawString(margin+1,(start_y+dest_y)/2+1,loop_label)
                     c.setFillColor(colors.black)
                 c.setStrokeColor(colors.black)
 
-    # ── Draw shapes (on top of arrows) ────────────────────────────────────
+    # ── Draw shapes ────────────────────────────────────────────────────────
     for idx,step in enumerate(steps):
         a=anchors[idx]
         sh_x,sh_bot=a["sh_x"],a["sh_bot"]
@@ -811,15 +804,14 @@ def generate_pdf(steps, meta):
         elif shape=="parallelogram": draw_parallelogram_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
         elif shape=="diamond":
             draw_diamond_shape(c, sh_x, sh_bot, sh_w, sh_h, txt)
-            # YES label to the right, NO label to the left – exactly like screenshot
-            c.setFont("Helvetica-Bold",5.5); c.setFillColor(GREEN)
+            c.setFont("Helvetica-Bold",7); c.setFillColor(GREEN)
             c.drawString(sh_x+sh_w+2, a["cy"]-2, f"{yes_lbl}")
-            no_w=c.stringWidth(f"{no_lbl}","Helvetica-Bold",5.5)
+            no_w=c.stringWidth(f"{no_lbl}","Helvetica-Bold",7)
             c.setFillColor(RED)
             c.drawString(sh_x-no_w-2, a["cy"]-2, f"{no_lbl}")
             c.setFillColor(colors.black)
         elif shape=="arrow_text":
-            c.setFont("Helvetica-Oblique",6); c.setFillColor(colors.HexColor("#333333"))
+            c.setFont("Helvetica-Oblique",8); c.setFillColor(colors.HexColor("#333333"))
             c.drawCentredString(a["cx"], a["cy"], txt)
             c.setFillColor(colors.black)
 
@@ -827,32 +819,32 @@ def generate_pdf(steps, meta):
 
     # ── SOP CHANGE RECORD ─────────────────────────────────────────────────
     cur_y -= 3*mm
-    CR_TITLE_H=5*mm
+    CR_TITLE_H=6*mm
     c.setFillColor(colors.HexColor("#DDEEFF"))
     c.rect(ML,cur_y-CR_TITLE_H,TW,CR_TITLE_H,fill=1,stroke=1)
-    c.setFont("Helvetica-Bold",7); c.setFillColor(colors.black)
-    c.drawCentredString(ML+TW/2, cur_y-CR_TITLE_H+1.5, "SOP Change Record")
+    c.setFont("Helvetica-Bold",9); c.setFillColor(colors.black)
+    c.drawCentredString(ML+TW/2, cur_y-CR_TITLE_H+2, "SOP Change Record")
     cur_y -= CR_TITLE_H
 
     CR_COLS=["S.No.","Effective\nDate","REV.\nNo.","Change Description",
              "Change Letter\n(Process:P / Doc:D / System:S)","Prepared By","Reviewed By","Approved By"]
-    CR_WIDTHS=[9*mm,18*mm,12*mm,50*mm,44*mm,21*mm,21*mm,0]
+    CR_WIDTHS=[10*mm,20*mm,13*mm,52*mm,46*mm,22*mm,22*mm,0]
     CR_WIDTHS[-1]=TW-sum(CR_WIDTHS[:-1])
     CR_XS=[ML]
     for w in CR_WIDTHS: CR_XS.append(CR_XS[-1]+w)
 
-    CR_HDR_H=7*mm
+    CR_HDR_H=8*mm
     for i,label in enumerate(CR_COLS):
         cw=CR_XS[i+1]-CR_XS[i]
         c.setFillColor(colors.HexColor("#EEF3FF"))
         c.rect(CR_XS[i],cur_y-CR_HDR_H,cw,CR_HDR_H,fill=1,stroke=1)
         c.setFillColor(colors.black)
-        lines=label.split("\n"); lh=5.5; sy=cur_y-CR_HDR_H/2+(len(lines)-1)*lh/2
+        lines=label.split("\n"); lh=7; sy=cur_y-CR_HDR_H/2+(len(lines)-1)*lh/2
         for li,ln in enumerate(lines):
-            c.setFont("Helvetica-Bold",5); c.drawCentredString(CR_XS[i]+cw/2, sy-li*(lh+0.3), ln)
+            c.setFont("Helvetica-Bold",6.5); c.drawCentredString(CR_XS[i]+cw/2, sy-li*(lh+0.3), ln)
     cur_y -= CR_HDR_H
 
-    CR_ROW_H=5.5*mm
+    CR_ROW_H=6.5*mm
     for row in meta.get("change_records",[]):
         vals=[row.get("sno",""),row.get("date",""),row.get("rev",""),row.get("desc",""),
               row.get("change_letter",""),row.get("prepared",""),row.get("reviewed",""),row.get("approved","")]
@@ -860,10 +852,9 @@ def generate_pdf(steps, meta):
             cw=CR_XS[i+1]-CR_XS[i]
             c.setFillColor(colors.white)
             c.rect(CR_XS[i],cur_y-CR_ROW_H,cw,CR_ROW_H,fill=1,stroke=1)
-            draw_centered_text(c, val, CR_XS[i]+cw/2, cur_y-CR_ROW_H/2, cw-2, font_size=5.5)
+            draw_centered_text(c, val, CR_XS[i]+cw/2, cur_y-CR_ROW_H/2, cw-2, font_size=7.5)
         cur_y -= CR_ROW_H
 
-    # Add 2 empty rows for future entries
     for _ in range(2):
         for i in range(len(CR_COLS)):
             cw=CR_XS[i+1]-CR_XS[i]
@@ -871,9 +862,8 @@ def generate_pdf(steps, meta):
             c.rect(CR_XS[i],cur_y-CR_ROW_H,cw,CR_ROW_H,fill=1,stroke=1)
         cur_y -= CR_ROW_H
 
-    # Composed By footer
     cur_y -= 2*mm
-    c.setFont("Helvetica-Oblique",5.5); c.setFillColor(colors.HexColor("#555555"))
+    c.setFont("Helvetica-Oblique",7); c.setFillColor(colors.HexColor("#555555"))
     c.drawCentredString(ML+TW/2, cur_y, f"Composed By: {meta['composed_by']}")
 
     c.save(); buf.seek(0); return buf
@@ -900,7 +890,6 @@ st.caption("Fill in the details, build your process flow, then download as PDF."
 
 tab1, tab2, tab3, tab4 = st.tabs(["🏷️ Header Info", "🤖 Process Flow", "📝 Change Record", "📄 Download PDF"])
 
-# ── TAB 1 ──────────────────────────────────────────────────────────────────────
 with tab1:
     st.subheader("Document Header Fields")
     c1, c2, c3 = st.columns(3)
@@ -924,7 +913,6 @@ with tab1:
     st.session_state.purpose = st.text_input("Purpose", st.session_state.purpose)
     st.session_state.scope   = st.text_area("Scope",    st.session_state.scope, height=80)
 
-# ── TAB 2 ──────────────────────────────────────────────────────────────────────
 with tab2:
     st.markdown("""
     <div class="ai-banner">
@@ -1067,7 +1055,6 @@ with tab2:
                     else:
                         st.warning("Please enter shape text.")
 
-        # ── Step list ──────────────────────────────────────────────────────────
         st.divider()
         n = len(st.session_state.steps)
         if n:
@@ -1113,7 +1100,6 @@ with tab2:
             else:
                 st.info("No steps yet. Use the form above to add process flow steps.")
 
-    # ── Live Preview ───────────────────────────────────────────────────────────
     with preview_col:
         st.subheader("👁️ Live Flowchart Preview")
         st.caption("Updates automatically as steps change.")
@@ -1130,7 +1116,6 @@ with tab2:
                 ("🟨","Diamond","Decision"),("🟩","Parallelogram","Input / Output")]):
                 gc.markdown(f"{icon} **{name}**  \n{desc}")
 
-# ── TAB 3 ──────────────────────────────────────────────────────────────────────
 with tab3:
     st.subheader("SOP Change Record")
     with st.form("cr_form", clear_on_submit=True):
@@ -1157,7 +1142,6 @@ with tab3:
         if cc2.button("🗑️", key=f"crdel_{i}"):
             st.session_state.change_records.pop(i); st.rerun()
 
-# ── TAB 4 ──────────────────────────────────────────────────────────────────────
 with tab4:
     st.subheader("Generate & Download PDF")
     if not st.session_state.steps:
