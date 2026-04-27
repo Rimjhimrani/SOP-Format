@@ -484,23 +484,26 @@ def generate_pdf(steps, meta):
     c.line(ML+LOGO_W, cur_y-HDR_H, ML+LOGO_W, cur_y)
     c.line(ML+LOGO_W+TITLE_W, cur_y-HDR_H, ML+LOGO_W+TITLE_W, cur_y)
 
-    # ── Left: Logo or company name ────────────────────────────────────────────
+    # ── Left: Company name (top) + Logo below — matches Image 2 ────────────────
+    # Company name always shown at top of left cell
+    c.setFont("Helvetica-Bold", 9); c.setFillColor(colors.black)
+    c.drawString(ML+4, cur_y-8, meta["company_name"])
+
     if meta.get("logo_bytes"):
         try:
             logo_img = ImageReader(io.BytesIO(meta["logo_bytes"]))
-            # Draw logo centred in cell, max 40mm wide x 22mm tall
-            lw=40*mm; lh=20*mm
-            c.drawImage(logo_img, ML+6, cur_y-HDR_H+5,
+            # Logo below company name — fill remaining cell height
+            lw=44*mm; lh=18*mm
+            logo_x = ML+4
+            logo_y = cur_y - HDR_H + 3   # near bottom of cell
+            c.drawImage(logo_img, logo_x, logo_y,
                         width=lw, height=lh, preserveAspectRatio=True, mask="auto")
         except Exception:
-            c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
-            c.drawString(ML+3, cur_y-10, meta["company_name"])
+            pass
     else:
-        c.setFont("Helvetica-Bold",12); c.setFillColor(colors.black)
-        c.drawString(ML+4, cur_y-10, meta["company_name"])
-        # eka sub-text in blue (matches original)
-        c.setFont("Helvetica-Bold",18); c.setFillColor(colors.HexColor("#1a6dcc"))
-        c.drawString(ML+4, cur_y-24, "eka")
+        # Default: "eka" logo text in blue below company name
+        c.setFont("Helvetica-Bold", 20); c.setFillColor(colors.HexColor("#1a6dcc"))
+        c.drawString(ML+4, cur_y-HDR_H+6, "eka")
         c.setFillColor(colors.black)
 
     # ── Centre: Title — properly vertically centred, no overlap ─────────────
@@ -548,6 +551,7 @@ def generate_pdf(steps, meta):
             fn="Helvetica-Bold" if is_lbl else "Helvetica"; fs=7 if is_lbl else 7.5
             draw_ltext(c,txt,xs[ci]+2,ry+rh/2,cw-3,fn,fs)
     cur_y -= HDR_H
+    cur_y -= 3*mm   # ← gap between header and Purpose row (matches Image 2)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # PURPOSE & SCOPE row
@@ -566,6 +570,7 @@ def generate_pdf(steps, meta):
         if is_lbl: c.setFont("Helvetica-Bold",9); c.drawString(x+3,cur_y-PS_H+3.5,txt)
         else: draw_ltext(c,txt,x+3,cur_y-PS_H/2,w-5,fs=8.5)
     cur_y -= PS_H
+    cur_y -= 3*mm   # ← gap between Purpose and Process Steps (matches Image 2)
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     # PROCESS STEPS TABLE
