@@ -536,7 +536,7 @@ def generate_pdf(steps, meta):
         ("Unit",    meta["unit"],    "Area", meta["area"]),
         ("Sub Area",meta["sub_area"],"Zone", meta["zone"]),
     ]
-    c1w=20*mm; c2w=28*mm; c3w=16*mm; c4w=META_W-c1w-c2w-c3w
+    c1w=20*mm; c2w=30*mm; c3w=16*mm; c4w=META_W-c1w-c2w-c3w
     for ri,(l1,v1,l2,v2) in enumerate(meta_rows):
         ry=cur_y-(ri+1)*rh
         xs=[RX, RX+c1w, RX+c1w+c2w, RX+c1w+c2w+c3w, RX+META_W]
