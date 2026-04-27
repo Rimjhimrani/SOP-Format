@@ -503,11 +503,29 @@ def generate_pdf(steps, meta):
         c.drawString(ML+4, cur_y-24, "eka")
         c.setFillColor(colors.black)
 
-    # ── Centre: Title ─────────────────────────────────────────────────────────
-    title_cx = ML+LOGO_W+TITLE_W/2
-    c.setFont("Helvetica-Bold",14); c.setFillColor(colors.black)
-    c.drawCentredString(title_cx, cur_y-10, "STANDARD OPERATING PROCEDURE")
-    draw_ctext(c, meta["title"], title_cx, cur_y-22, TITLE_W-6, fn="Helvetica", fs=9.5)
+    # ── Centre: Title — properly vertically centred, no overlap ─────────────
+    title_cx  = ML + LOGO_W + TITLE_W / 2
+    cell_top  = cur_y
+    cell_bot  = cur_y - HDR_H
+
+    SOP_FS   = 13
+    SUB_FS   = 9
+    SUB_LH   = SUB_FS + 2
+    GAP      = 5
+    SOP_LH   = SOP_FS + 2
+
+    sub_lines = wrapped_lines_pdf(c, meta["title"], TITLE_W - 8, "Helvetica", SUB_FS)
+    block_h   = SOP_LH + GAP + len(sub_lines) * SUB_LH
+    block_top = (cell_top + cell_bot) / 2.0 + block_h / 2.0
+
+    c.setFont("Helvetica-Bold", SOP_FS)
+    c.setFillColor(colors.black)
+    c.drawCentredString(title_cx, block_top - SOP_LH * 0.80, "STANDARD OPERATING PROCEDURE")
+
+    c.setFont("Helvetica", SUB_FS)
+    sub_y0 = block_top - SOP_LH - GAP
+    for i, ln in enumerate(sub_lines):
+        c.drawCentredString(title_cx, sub_y0 - SUB_LH * 0.80 - i * SUB_LH, ln)
 
     # ── Right: Meta grid (4 rows × 2 pairs) ──────────────────────────────────
     RX = ML+LOGO_W+TITLE_W
