@@ -394,16 +394,25 @@ def wrapped_lines_pdf(c, text, max_w, fn, fs):
     return lines or [""]
 
 def draw_ctext(c, text, cx, cy, max_w, fn="Helvetica", fs=10, col=colors.black):
-    lines=wrapped_lines_pdf(c,text,max_w,fn,fs)
-    lh=fs+2; tot=len(lines)*lh; sy=cy+tot/2-lh*0.75
-    c.setFont(fn,fs); c.setFillColor(col)
-    for i,ln in enumerate(lines): c.drawCentredString(cx, sy-i*lh, ln)
+    """Draw centred text, vertically centred around cy (cy is the cell mid-point)."""
+    lines = wrapped_lines_pdf(c, text, max_w, fn, fs)
+    lh = fs * 1.2          # line height ≈ 120 % of font size
+    block_h = len(lines) * lh
+    # Start of first baseline: cy + half block - one leading (so block straddles cy)
+    y0 = cy + block_h / 2 - lh + lh * 0.25   # 0.25 = descender allowance
+    c.setFont(fn, fs); c.setFillColor(col)
+    for i, ln in enumerate(lines):
+        c.drawCentredString(cx, y0 - i * lh, ln)
 
 def draw_ltext(c, text, x, cy, max_w, fn="Helvetica", fs=10, col=colors.black):
-    lines=wrapped_lines_pdf(c,text,max_w,fn,fs)
-    lh=fs+2; tot=len(lines)*lh; sy=cy+tot/2-lh*0.75
-    c.setFont(fn,fs); c.setFillColor(col)
-    for i,ln in enumerate(lines): c.drawString(x, sy-i*lh, ln)
+    """Draw left-aligned text, vertically centred around cy."""
+    lines = wrapped_lines_pdf(c, text, max_w, fn, fs)
+    lh = fs * 1.2
+    block_h = len(lines) * lh
+    y0 = cy + block_h / 2 - lh + lh * 0.25
+    c.setFont(fn, fs); c.setFillColor(col)
+    for i, ln in enumerate(lines):
+        c.drawString(x, y0 - i * lh, ln)
 
 def arrow_head(c, tx, ty, d="down"):
     sz=2.5; c.setFillColor(colors.black); p=c.beginPath()
@@ -499,8 +508,8 @@ def generate_pdf(steps, meta):
     cell_bot  = cur_y - HDR_H
 
     # UPDATED: SOP heading font size 15 (was 13), subtitle font size 11 (was 9)
-    SOP_FS   = 13
-    SUB_FS   = 10
+    SOP_FS   = 15
+    SUB_FS   = 11
     SUB_LH   = SUB_FS + 2
     GAP      = 5
     SOP_LH   = SOP_FS + 2
@@ -537,7 +546,7 @@ def generate_pdf(steps, meta):
             c.setStrokeColor(colors.black); c.setLineWidth(0.4)
             c.rect(xs[ci],ry,cw,rh,fill=1,stroke=1); c.setFillColor(colors.black)
             # UPDATED: label font 9, value font 9 (was 7 / 7.5)
-            fn="Helvetica-Bold" if is_lbl else "Helvetica"; fs=10
+            fn="Helvetica-Bold" if is_lbl else "Helvetica"; fs=9
             draw_ltext(c,txt,xs[ci]+2,ry+rh/2,cw-3,fn,fs)
     cur_y -= HDR_H
     cur_y -= 3*mm
@@ -557,10 +566,10 @@ def generate_pdf(steps, meta):
         c.setFillColor(colors.HexColor("#D6E8F7") if is_lbl else colors.white)
         c.rect(x,cur_y-PS_H,w,PS_H,fill=1,stroke=1); c.setFillColor(colors.black)
         if is_lbl:
-            # UPDATED: label font 11 (was 9)
-            c.setFont("Helvetica-Bold",11); c.drawString(x+3,cur_y-PS_H+4,txt)
+            c.setFont("Helvetica-Bold",11)
+            # vertically centre the single label in the cell
+            c.drawString(x+3, cur_y - PS_H/2 - 11*0.3, txt)
         else:
-            # UPDATED: value font 10 (was 8.5)
             draw_ltext(c,txt,x+3,cur_y-PS_H/2,w-5,fs=10)
     cur_y -= PS_H
     cur_y -= 3*mm
@@ -597,22 +606,27 @@ def generate_pdf(steps, meta):
     c.rect(ML,cur_y-HDR1_H,TW,HDR1_H,fill=1,stroke=1)
     # UPDATED: banner font 11 (was 10)
     c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
-    c.drawString(ML+3, cur_y-HDR1_H+3, "Process Steps:")
-    c.drawString(XS[2]+3, cur_y-HDR1_H+3, f"OWNER :   {meta['owner']}")
+    # vertically centre text in the banner row
+    _banner_y = cur_y - HDR1_H/2 - 11*0.3
+    c.drawString(ML+3, _banner_y, "Process Steps:")
+    c.drawString(XS[2]+3, _banner_y, f"OWNER :   {meta['owner']}")
     cur_y -= HDR1_H
 
     # ── Column headers ────────────────────────────────────────────────────────
-    HDR2_H=12*mm   # taller for bigger font
+    HDR2_H=10*mm   # taller for bigger font
     hdr_labels=["Input","Process Flow","Output","Responsible","Doc. Format /\nSystem","Effective\nMeasurement"]
     for i,label in enumerate(hdr_labels):
         cw=XS[i+1]-XS[i]
         c.setFillColor(colors.HexColor("#D6E8F7"))
         c.rect(XS[i],cur_y-HDR2_H,cw,HDR2_H,fill=1,stroke=1); c.setFillColor(colors.black)
         lines=label.split("\n")
-        # UPDATED: column header font 9 (was 7.5)
-        lh=8; sy=cur_y-HDR2_H/2+(len(lines)-1)*lh/2
-        for li,ln in enumerate(lines):
-            c.setFont("Helvetica-Bold",10.5); c.drawCentredString(XS[i]+cw/2,sy-li*(lh+0.5),ln)
+        fs_h = 9; lh = fs_h * 1.2
+        total_h = len(lines) * lh
+        y_mid = cur_y - HDR2_H / 2
+        y0 = y_mid + total_h / 2 - lh + lh * 0.25
+        for li, ln in enumerate(lines):
+            c.setFont("Helvetica-Bold", fs_h)
+            c.drawCentredString(XS[i]+cw/2, y0 - li*lh, ln)
     cur_y -= HDR2_H
 
     # ── Shape heights in PDF — taller to fit bigger text ─────────────────────
@@ -768,7 +782,8 @@ def generate_pdf(steps, meta):
     c.rect(ML,cur_y-CR_TH,TW,CR_TH,fill=1,stroke=1)
     # UPDATED: Change Record banner font 11 (was 9)
     c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
-    c.drawCentredString(ML+TW/2,cur_y-CR_TH+3,"SOP Change Record")
+    # vertically centre banner text
+    c.drawCentredString(ML+TW/2, cur_y - CR_TH/2 - 11*0.3, "SOP Change Record")
     cur_y-=CR_TH
 
     CR_COLS=["S.No.","Effective\nDate","REV.\nNo.","Change Description",
@@ -784,10 +799,13 @@ def generate_pdf(steps, meta):
         c.setFillColor(colors.HexColor("#D6E8F7"))
         c.rect(CR_XS[i],cur_y-CR_HH,cw,CR_HH,fill=1,stroke=1); c.setFillColor(colors.black)
         lines=lbl.split("\n")
-        # UPDATED: Change Record header font 8 (was 6.5)
-        lh=8; sy3=cur_y-CR_HH/2+(len(lines)-1)*lh/2
+        fs_cr = 8; lh_cr = fs_cr * 1.2
+        total_h = len(lines) * lh_cr
+        y_mid = cur_y - CR_HH / 2
+        y0 = y_mid + total_h / 2 - lh_cr + lh_cr * 0.25
         for li,ln in enumerate(lines):
-            c.setFont("Helvetica-Bold",8); c.drawCentredString(CR_XS[i]+cw/2,sy3-li*(lh+0.3),ln)
+            c.setFont("Helvetica-Bold", fs_cr)
+            c.drawCentredString(CR_XS[i]+cw/2, y0 - li*lh_cr, ln)
     cur_y-=CR_HH
 
     CR_RH=8*mm   # taller data rows
@@ -797,7 +815,6 @@ def generate_pdf(steps, meta):
         for i,val in enumerate(vals):
             cw=CR_XS[i+1]-CR_XS[i]
             c.setFillColor(colors.white); c.rect(CR_XS[i],cur_y-CR_RH,cw,CR_RH,fill=1,stroke=1)
-            # UPDATED: Change Record data font 9 (was 7.5)
             draw_ctext(c,val,CR_XS[i]+cw/2,cur_y-CR_RH/2,cw-3,fs=9)
         cur_y-=CR_RH
     # 2 blank rows
@@ -807,10 +824,10 @@ def generate_pdf(steps, meta):
             c.setFillColor(colors.white); c.rect(CR_XS[i],cur_y-CR_RH,cw,CR_RH,fill=1,stroke=1)
         cur_y-=CR_RH
 
-    cur_y-=2*mm
-    # UPDATED: Composed By font 9 (was 7)
+    # "Composed By" — give it clear breathing room below the table
+    cur_y -= 5*mm
     c.setFont("Helvetica-Oblique",9); c.setFillColor(colors.HexColor("#555555"))
-    c.drawCentredString(ML+TW/2,cur_y,f"Composed By: {meta['composed_by']}")
+    c.drawCentredString(ML+TW/2, cur_y, f"Composed By: {meta['composed_by']}")
 
     c.save(); buf.seek(0); return buf
 
