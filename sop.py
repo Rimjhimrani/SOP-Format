@@ -612,7 +612,7 @@ def generate_pdf(steps, meta):
         # UPDATED: column header font 9 (was 7.5)
         lh=8; sy=cur_y-HDR2_H/2+(len(lines)-1)*lh/2
         for li,ln in enumerate(lines):
-            c.setFont("Helvetica-Bold",9); c.drawCentredString(XS[i]+cw/2,sy-li*(lh+0.5),ln)
+            c.setFont("Helvetica-Bold",12); c.drawCentredString(XS[i]+cw/2,sy-li*(lh+0.5),ln)
     cur_y -= HDR2_H
 
     # ── Shape heights in PDF — taller to fit bigger text ─────────────────────
