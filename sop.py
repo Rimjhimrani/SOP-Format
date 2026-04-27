@@ -546,7 +546,7 @@ def generate_pdf(steps, meta):
             c.setStrokeColor(colors.black); c.setLineWidth(0.4)
             c.rect(xs[ci],ry,cw,rh,fill=1,stroke=1); c.setFillColor(colors.black)
             # UPDATED: label font 9, value font 9 (was 7 / 7.5)
-            fn="Helvetica-Bold" if is_lbl else "Helvetica"; fs=9
+            fn="Helvetica-Bold" if is_lbl else "Helvetica"; fs=11
             draw_ltext(c,txt,xs[ci]+2,ry+rh/2,cw-3,fn,fs)
     cur_y -= HDR_H
     cur_y -= 3*mm
