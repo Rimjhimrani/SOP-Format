@@ -32,7 +32,7 @@ with st.sidebar:
         img_b64 = base64.b64encode(st.session_state.logo_bytes).decode()
         st.markdown(f'<img src="data:image/png;base64,{img_b64}" style="max-height:60px;max-width:160px"/>', unsafe_allow_html=True)
         st.success("Logo uploaded ✓")
-    elif "logo_bytes" in st.session_state:
+    elif st.session_state.get("logo_bytes"):
         img_b64 = base64.b64encode(st.session_state.logo_bytes).decode()
         st.markdown(f'<img src="data:image/png;base64,{img_b64}" style="max-height:60px;max-width:160px"/>', unsafe_allow_html=True)
         st.caption("Current logo")
