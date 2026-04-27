@@ -613,7 +613,7 @@ def generate_pdf(steps, meta):
     cur_y -= HDR1_H
 
     # ── Column headers ────────────────────────────────────────────────────────
-    HDR2_H=10*mm   # taller for bigger font
+    HDR2_H=11*mm   # taller for bigger font
     hdr_labels=["Input","Process Flow","Output","Responsible","Doc. Format /\nSystem","Effective\nMeasurement"]
     for i,label in enumerate(hdr_labels):
         cw=XS[i+1]-XS[i]
