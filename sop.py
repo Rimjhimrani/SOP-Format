@@ -495,15 +495,16 @@ def generate_pdf(steps, meta):
             # Logo below company name — fill remaining cell height
             lw=44*mm; lh=18*mm
             logo_x = ML+4
-            logo_y = cur_y - HDR_H + 3   # near bottom of cell
+            logo_y = cur_y - HDR_H + (HDR_H - lh) / 2  # vertically centred in cell
             c.drawImage(logo_img, logo_x, logo_y,
                         width=lw, height=lh, preserveAspectRatio=True, mask="auto")
         except Exception:
             pass
     else:
-        # Default: "eka" logo text in blue below company name
+        # Default: "eka" logo text in blue — vertically centred in cell
         c.setFont("Helvetica-Bold", 20); c.setFillColor(colors.HexColor("#1a6dcc"))
-        c.drawString(ML+4, cur_y-HDR_H+6, "eka")
+        eka_y = cur_y - HDR_H/2 - 5   # centre of cell, slightly below midpoint
+        c.drawString(ML+4, eka_y, "eka")
         c.setFillColor(colors.black)
 
     # ── Centre: Title — properly vertically centred, no overlap ─────────────
