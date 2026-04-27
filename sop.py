@@ -499,8 +499,8 @@ def generate_pdf(steps, meta):
     cell_bot  = cur_y - HDR_H
 
     # UPDATED: SOP heading font size 15 (was 13), subtitle font size 11 (was 9)
-    SOP_FS   = 15
-    SUB_FS   = 11
+    SOP_FS   = 13
+    SUB_FS   = 10
     SUB_LH   = SUB_FS + 2
     GAP      = 5
     SOP_LH   = SOP_FS + 2
