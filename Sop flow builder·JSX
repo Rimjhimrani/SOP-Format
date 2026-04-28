@@ -1,0 +1,666 @@
+import { useState, useRef, useCallback } from "react";
+
+const SHAPES = {
+  oval: "Oval / Terminator",
+  rect: "Process (Rectangle)",
+  diamond: "Decision (Diamond)",
+  parallelogram: "Parallelogram (I/O)",
+  arrow_text: "Annotation Text",
+};
+
+const COLORS = {
+  oval: { fill: "#2D3748", stroke: "#1A202C", text: "#fff" },
+  rect: { fill: "#EBF4FF", stroke: "#2B6CB0", text: "#1A365D" },
+  diamond: { fill: "#FFF9E6", stroke: "#B7791F", text: "#744210" },
+  parallelogram: { fill: "#F0FFF4", stroke: "#276749", text: "#1C4532" },
+  arrow_text: { fill: "none", stroke: "none", text: "#4A5568" },
+};
+
+const defaultStep = () => ({
+  id: Date.now() + Math.random(),
+  shape: "rect",
+  text: "",
+  column: "left",
+  connect_from: "",
+  connect_side: "bottom",
+  arrow_label: "",
+  loop_to: "",
+  loop_label: "",
+  input_label: "",
+  output_label: "",
+  responsible: "",
+  doc_format: "",
+  measurement: "",
+  yes_label: "YES",
+  no_label: "NO",
+});
+
+// ── SVG Preview ───────────────────────────────────────────────────────────────
+function FlowSVG({ steps }) {
+  if (!steps.length)
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 200, color: "var(--color-text-secondary)", fontSize: 14, border: "1.5px dashed var(--color-border-tertiary)", borderRadius: 12 }}>
+        Add steps to preview flowchart
+      </div>
+    );
+
+  const SVG_W = 660;
+  const COL_L = 190, COL_R = 470;
+  const BOX_W = 160;
+  const SH_H = { rect: 54, oval: 42, parallelogram: 54, diamond: 72, arrow_text: 26 };
+  const ROW_GAP = 34;
+  const TOP_Y = 40;
+
+  const rows = [], stepToRow = {};
+  steps.forEach((step, idx) => {
+    if (step.column === "right") {
+      let placed = false;
+      for (let ri = rows.length - 1; ri >= 0; ri--) {
+        if (rows[ri].right === null) { rows[ri].right = idx; stepToRow[idx] = ri; placed = true; break; }
+      }
+      if (!placed) { rows.push({ left: null, right: idx }); stepToRow[idx] = rows.length - 1; }
+    } else {
+      rows.push({ left: idx, right: null }); stepToRow[idx] = rows.length - 1;
+    }
+  });
+
+  const rowGeom = []; let cy = TOP_Y;
+  rows.forEach(row => {
+    const hl = row.left !== null ? SH_H[steps[row.left].shape] || 54 : 0;
+    const hr = row.right !== null ? SH_H[steps[row.right].shape] || 54 : 0;
+    const rh = Math.max(hl, hr);
+    rowGeom.push({ y_top: cy, row_h: rh });
+    cy += rh + ROW_GAP;
+  });
+  const SVG_H = cy + 20;
+
+  const anchors = {};
+  steps.forEach((step, idx) => {
+    const ri = stepToRow[idx], rg = rowGeom[ri];
+    const cx = step.column === "right" ? COL_R : COL_L;
+    const sh = SH_H[step.shape] || 54;
+    anchors[idx] = { cx, cy: rg.y_top + sh / 2, top: rg.y_top, bot: rg.y_top + sh, left: cx - BOX_W / 2, right: cx + BOX_W / 2, sh, col: step.column };
+  });
+
+  const esc = t => String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  const wrap = (text, maxc = 22) => {
+    const words = String(text).split(" "); const lines = []; let cur = "";
+    words.forEach(w => { const t = (cur + " " + w).trim(); if (t.length <= maxc) cur = t; else { if (cur) lines.push(cur); cur = w; } });
+    if (cur) lines.push(cur); return lines.length ? lines : [""];
+  };
+  const textSVG = (lines, cx, midy, fs = 11, fill = "#1a1a1a") => {
+    const lh = fs + 3, tot = lines.length * lh;
+    const y0 = midy - tot / 2 + lh * 0.8;
+    return lines.map((ln, i) => `<text x="${cx}" y="${(y0 + i * lh).toFixed(1)}" text-anchor="middle" font-size="${fs}" fill="${fill}" font-family="'Segoe UI',sans-serif">${esc(ln)}</text>`).join("");
+  };
+  const arrowHead = (tx, ty, d = "down") => {
+    const s = 4.5;
+    if (d === "down") return `M${tx},${ty} L${tx - s},${ty - s * 1.5} L${tx + s},${ty - s * 1.5}Z`;
+    if (d === "right") return `M${tx},${ty} L${tx - s * 1.5},${ty - s} L${tx - s * 1.5},${ty + s}Z`;
+    if (d === "left") return `M${tx},${ty} L${tx + s * 1.5},${ty - s} L${tx + s * 1.5},${ty + s}Z`;
+    return `M${tx},${ty} L${tx - s},${ty + s * 1.5} L${tx + s},${ty + s * 1.5}Z`;
+  };
+
+  const ARROW = "#4a5568", YES_C = "#276749", NO_C = "#c53030";
+  let arrowSVG = "", shapeSVG = "";
+
+  steps.forEach((step, idx) => {
+    const a = anchors[idx];
+    const lbl = (step.arrow_label || "").trim();
+    const cf = String(step.connect_from || "");
+    const side = step.connect_side || "bottom";
+    const lt = String(step.loop_to || "");
+    const ll = (step.loop_label || "").trim();
+    const ac = lbl.toUpperCase() === "YES" ? YES_C : lbl.toUpperCase() === "NO" ? NO_C : ARROW;
+
+    if (/^\d+$/.test(cf)) {
+      const src = parseInt(cf);
+      if (src >= 0 && src < steps.length && anchors[src]) {
+        const s = anchors[src];
+        if (side === "right") {
+          arrowSVG += `<path d="M${s.right},${s.cy} L${a.cx},${s.cy} L${a.cx},${a.top}" fill="none" stroke="${ac}" stroke-width="1.5" stroke-linejoin="round"/>`;
+          arrowSVG += `<path d="${arrowHead(a.cx, a.top)}" fill="${ac}"/>`;
+        } else if (side === "left") {
+          arrowSVG += `<path d="M${s.left},${s.cy} L${a.cx},${s.cy} L${a.cx},${a.top}" fill="none" stroke="${ac}" stroke-width="1.5" stroke-linejoin="round"/>`;
+          arrowSVG += `<path d="${arrowHead(a.cx, a.top)}" fill="${ac}"/>`;
+        } else {
+          if (Math.abs(s.cx - a.cx) < 3) {
+            arrowSVG += `<line x1="${s.cx}" y1="${s.bot}" x2="${a.cx}" y2="${a.top}" stroke="${ac}" stroke-width="1.5"/>`;
+          } else {
+            const my = (s.bot + a.top) / 2;
+            arrowSVG += `<path d="M${s.cx},${s.bot} L${s.cx},${my} L${a.cx},${my} L${a.cx},${a.top}" fill="none" stroke="${ac}" stroke-width="1.5" stroke-linejoin="round"/>`;
+          }
+          arrowSVG += `<path d="${arrowHead(a.cx, a.top)}" fill="${ac}"/>`;
+        }
+        if (lbl) {
+          const mx = (s.cx + a.cx) / 2, my = (s.bot + a.top) / 2 - 3;
+          arrowSVG += `<rect x="${mx - 18}" y="${my - 8}" width="36" height="13" rx="3" fill="white" stroke="${ac}" stroke-width="0.6" opacity="0.95"/>`;
+          arrowSVG += `<text x="${mx}" y="${my + 2}" text-anchor="middle" font-size="9" font-weight="700" fill="${ac}" font-family="'Segoe UI',sans-serif">${esc(lbl)}</text>`;
+        }
+      }
+    } else if (idx > 0) {
+      const prev = [...Array(idx).keys()].reverse().find(pi => anchors[pi]?.col === a.col);
+      if (prev !== undefined) {
+        const ps = anchors[prev];
+        arrowSVG += `<line x1="${a.cx}" y1="${ps.bot}" x2="${a.cx}" y2="${a.top}" stroke="${ARROW}" stroke-width="1.5"/>`;
+        arrowSVG += `<path d="${arrowHead(a.cx, a.top)}" fill="${ARROW}"/>`;
+      }
+    }
+
+    if (/^\d+$/.test(lt)) {
+      const dest = anchors[parseInt(lt)];
+      if (dest) {
+        const lc = ll.toUpperCase() === "YES" ? YES_C : ll.toUpperCase() === "NO" ? NO_C : "#1a6dcc";
+        const lx = a.left - 22;
+        arrowSVG += `<path d="M${a.left},${a.cy} L${lx},${a.cy} L${lx},${dest.cy} L${dest.left},${dest.cy}" fill="none" stroke="${lc}" stroke-width="1.5" stroke-dasharray="5 3" stroke-linejoin="round"/>`;
+        arrowSVG += `<path d="${arrowHead(dest.left, dest.cy, "right")}" fill="${lc}"/>`;
+        if (ll) arrowSVG += `<text x="${lx - 4}" y="${(a.cy + dest.cy) / 2}" text-anchor="end" font-size="9" font-weight="700" fill="${lc}" font-family="'Segoe UI',sans-serif">${esc(ll)}</text>`;
+      }
+    }
+  });
+
+  steps.forEach((step, idx) => {
+    const a = anchors[idx];
+    const sh = step.shape, cl = COLORS[sh] || COLORS.rect;
+    const cx = a.cx, cy = a.cy, bw = BOX_W, bh = a.sh;
+    const x0 = cx - bw / 2, y0 = a.top;
+    const lines = wrap(step.text || "");
+    const yl = step.yes_label || "YES", nl = step.no_label || "NO";
+
+    shapeSVG += "<g>";
+    if (sh === "rect") {
+      shapeSVG += `<rect x="${x0}" y="${y0}" width="${bw}" height="${bh}" rx="6" fill="${cl.fill}" stroke="${cl.stroke}" stroke-width="1.4"/>`;
+      shapeSVG += textSVG(lines, cx, cy, 11, cl.text);
+    } else if (sh === "oval") {
+      shapeSVG += `<ellipse cx="${cx}" cy="${cy}" rx="${bw / 2}" ry="${bh / 2}" fill="${cl.fill}" stroke="${cl.stroke}" stroke-width="1.4"/>`;
+      shapeSVG += textSVG(lines, cx, cy, 11, cl.text);
+    } else if (sh === "diamond") {
+      shapeSVG += `<polygon points="${cx},${y0} ${cx + bw / 2},${cy} ${cx},${y0 + bh} ${cx - bw / 2},${cy}" fill="${cl.fill}" stroke="${cl.stroke}" stroke-width="1.4"/>`;
+      shapeSVG += textSVG(lines, cx, cy, 10, cl.text);
+      shapeSVG += `<text x="${cx + bw / 2 + 7}" y="${cy + 4}" font-size="9" font-weight="700" fill="${YES_C}" font-family="'Segoe UI',sans-serif">${esc(yl)} →</text>`;
+      shapeSVG += `<text x="${cx - bw / 2 - 7}" y="${cy + 4}" font-size="9" font-weight="700" text-anchor="end" fill="${NO_C}" font-family="'Segoe UI',sans-serif">← ${esc(nl)}</text>`;
+    } else if (sh === "parallelogram") {
+      const sk = 9;
+      shapeSVG += `<polygon points="${x0 + sk},${y0} ${x0 + bw},${y0} ${x0 + bw - sk},${y0 + bh} ${x0},${y0 + bh}" fill="${cl.fill}" stroke="${cl.stroke}" stroke-width="1.4"/>`;
+      shapeSVG += textSVG(lines, cx, cy, 11, cl.text);
+    } else if (sh === "arrow_text") {
+      shapeSVG += `<text x="${cx}" y="${cy + 4}" text-anchor="middle" font-size="11" fill="${cl.text}" font-style="italic" font-family="'Segoe UI',sans-serif">${esc(step.text || "")}</text>`;
+    }
+    shapeSVG += `<circle cx="${x0 + 10}" cy="${y0 + 10}" r="8" fill="${cl.stroke}" opacity="0.9"/>`;
+    shapeSVG += `<text x="${x0 + 10}" y="${y0 + 14}" text-anchor="middle" font-size="7.5" font-weight="700" fill="white" font-family="'Segoe UI',sans-serif">${idx + 1}</text>`;
+    shapeSVG += "</g>";
+  });
+
+  const hasRight = steps.some(s => s.column === "right");
+  const midX = (COL_L + BOX_W / 2 + COL_R - BOX_W / 2) / 2;
+
+  return (
+    <svg width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={{ display: "block", width: "100%" }}>
+      <rect width={SVG_W} height={SVG_H} fill="#FAFBFC" />
+      {hasRight && <line x1={midX} y1={28} x2={midX} y2={SVG_H - 10} stroke="#CBD5E0" strokeWidth="0.8" strokeDasharray="4 4" />}
+      <text x={COL_L} y={20} textAnchor="middle" fontSize="11" fontWeight="600" fill="#1A365D" fontFamily="'Segoe UI',sans-serif">Main Flow</text>
+      {hasRight && <text x={COL_R} y={20} textAnchor="middle" fontSize="11" fontWeight="600" fill="#1C4532" fontFamily="'Segoe UI',sans-serif">Branch</text>}
+      <g dangerouslySetInnerHTML={{ __html: arrowSVG + shapeSVG }} />
+    </svg>
+  );
+}
+
+// ── Step Form ─────────────────────────────────────────────────────────────────
+function StepForm({ steps, onAdd }) {
+  const [form, setForm] = useState({
+    shape: "rect", text: "", column: "left",
+    connect_from: "", connect_side: "bottom", arrow_label: "",
+    loop_to: "", loop_label: "",
+    input_label: "", output_label: "", responsible: "", doc_format: "", measurement: "",
+    yes_label: "YES", no_label: "NO",
+    // decision branch helpers
+    yes_action: "none", yes_shape: "rect", yes_text: "", yes_col: "right",
+    no_action: "none", no_shape: "rect", no_text: "", no_col: "left",
+    yes_loop_to: "", yes_loop_label: "YES",
+    no_loop_to: "", no_loop_label: "NO",
+    yes_join_step: "", yes_join_side: "bottom",
+    no_join_step: "", no_join_side: "left",
+  });
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const isDiamond = form.shape === "diamond";
+
+  const stepOpts = steps.map((s, i) => ({ value: String(i), label: `Step ${i + 1}: ${(s.text || "").slice(0, 35)}` }));
+
+  const handleAdd = () => {
+    if (!form.text.trim()) return;
+    const newSteps = [];
+    const baseIdx = steps.length;
+
+    const base = {
+      ...defaultStep(), shape: form.shape, text: form.text.trim(),
+      column: form.column, connect_from: form.connect_from,
+      connect_side: form.connect_side, arrow_label: form.arrow_label,
+      loop_to: form.loop_to, loop_label: form.loop_label,
+      input_label: form.input_label, output_label: form.output_label,
+      responsible: form.responsible, doc_format: form.doc_format,
+      measurement: form.measurement, yes_label: form.yes_label, no_label: form.no_label,
+    };
+
+    if (isDiamond) {
+      // handle YES loop
+      if (form.yes_action === "loop" && form.yes_loop_to !== "") {
+        base.loop_to = form.yes_loop_to; base.loop_label = form.yes_loop_label;
+      }
+      // handle NO loop
+      if (form.no_action === "loop" && form.no_loop_to !== "") {
+        if (!base.loop_to) { base.loop_to = form.no_loop_to; base.loop_label = form.no_loop_label; }
+      }
+      newSteps.push(base);
+
+      // YES new shape
+      if (form.yes_action === "new" && form.yes_text.trim()) {
+        newSteps.push({ ...defaultStep(), shape: form.yes_shape, text: form.yes_text.trim(), column: form.yes_col, connect_from: String(baseIdx), connect_side: form.yes_col === "right" ? "right" : "bottom", arrow_label: form.yes_label || "YES" });
+      }
+      // NO new shape
+      if (form.no_action === "new" && form.no_text.trim()) {
+        newSteps.push({ ...defaultStep(), shape: form.no_shape, text: form.no_text.trim(), column: form.no_col, connect_from: String(baseIdx), connect_side: form.no_col === "right" ? "right" : "left", arrow_label: form.no_label || "NO" });
+      }
+      // YES join
+      if (form.yes_action === "join" && form.yes_join_step !== "") {
+        // annotate existing step? We just update connect_from for user clarity via annotation
+      }
+    } else {
+      newSteps.push(base);
+    }
+
+    onAdd(newSteps);
+    setForm(f => ({ ...f, text: "", arrow_label: "", loop_to: "", loop_label: "", input_label: "", output_label: "", responsible: "", doc_format: "", measurement: "", connect_from: "", yes_text: "", no_text: "", yes_action: "none", no_action: "none" }));
+  };
+
+  const inp = (label, key, opts = {}) => (
+    <div style={{ marginBottom: 8 }}>
+      <label style={{ display: "block", fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 3 }}>{label}</label>
+      <input value={form[key]} onChange={e => set(key, e.target.value)} placeholder={opts.placeholder || ""} style={{ width: "100%", fontSize: 13, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", boxSizing: "border-box" }} />
+    </div>
+  );
+  const sel = (label, key, options) => (
+    <div style={{ marginBottom: 8 }}>
+      <label style={{ display: "block", fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 3 }}>{label}</label>
+      <select value={form[key]} onChange={e => set(key, e.target.value)} style={{ width: "100%", fontSize: 13, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)" }}>
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+
+  const shapeOpts = Object.entries(SHAPES).map(([v, l]) => ({ value: v, label: l }));
+  const nonDiamondOpts = shapeOpts.filter(o => o.value !== "diamond");
+  const sideOpts = [{ value: "bottom", label: "Bottom (default)" }, { value: "right", label: "Right side →" }, { value: "left", label: "Left side ←" }];
+  const colOpts = [{ value: "left", label: "Left (main flow)" }, { value: "right", label: "Right (branch)" }];
+  const actionOpts = [{ value: "none", label: "— none —" }, { value: "new", label: "Add new shape" }, { value: "loop", label: "Loop back to step" }, { value: "join", label: "Join existing step" }];
+
+  return (
+    <div style={{ background: "var(--color-background-secondary)", borderRadius: 12, padding: 16, border: "1px solid var(--color-border-tertiary)" }}>
+      <div style={{ fontWeight: 500, fontSize: 13, marginBottom: 12, color: "var(--color-text-primary)" }}>Add Step</div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+        {sel("Shape type", "shape", shapeOpts)}
+        {sel("Column", "column", colOpts)}
+      </div>
+
+      {inp("Text inside shape *", "text", { placeholder: "e.g. Check material coverage…" })}
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 10px" }}>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 3 }}>Connect from step #</label>
+          <input value={form.connect_from} onChange={e => set("connect_from", e.target.value)} placeholder="blank = auto" style={{ width: "100%", fontSize: 13, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", boxSizing: "border-box" }} />
+        </div>
+        {sel("Arrow exits from", "connect_side", sideOpts)}
+        {inp("Arrow label (YES/NO/blank)", "arrow_label")}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 10px" }}>
+        <div>
+          <label style={{ display: "block", fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 3 }}>Loop-back to step #</label>
+          <input value={form.loop_to} onChange={e => set("loop_to", e.target.value)} placeholder="step index" style={{ width: "100%", fontSize: 13, padding: "5px 8px", borderRadius: 6, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", boxSizing: "border-box" }} />
+        </div>
+        {inp("Loop label", "loop_label", { placeholder: "e.g. NO" })}
+      </div>
+
+      {isDiamond && (
+        <>
+          <div style={{ borderTop: "1px solid var(--color-border-tertiary)", margin: "12px 0 10px", paddingTop: 10, fontWeight: 500, fontSize: 12, color: "var(--color-text-secondary)" }}>Decision Branch Configuration</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 14px" }}>
+            {/* YES branch */}
+            <div style={{ background: "var(--color-background-primary)", borderRadius: 8, padding: 10, border: "1px solid #c6f6d5" }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: "#276749", marginBottom: 8 }}>YES Branch</div>
+              {inp("YES label text", "yes_label", { placeholder: "YES" })}
+              {sel("YES branch action", "yes_action", actionOpts)}
+              {form.yes_action === "new" && (
+                <>
+                  {sel("New shape type", "yes_shape", nonDiamondOpts)}
+                  {sel("Column", "yes_col", colOpts)}
+                  {inp("Text in new YES step", "yes_text")}
+                </>
+              )}
+              {form.yes_action === "loop" && (
+                <>
+                  {sel("Loop back to step", "yes_loop_to", [{ value: "", label: "— select —" }, ...stepOpts])}
+                  {inp("Loop label", "yes_loop_label", { placeholder: "YES" })}
+                </>
+              )}
+              {form.yes_action === "join" && (
+                <>
+                  {sel("Join step", "yes_join_step", [{ value: "", label: "— select —" }, ...stepOpts])}
+                  {sel("Arrow side", "yes_join_side", sideOpts)}
+                </>
+              )}
+            </div>
+
+            {/* NO branch */}
+            <div style={{ background: "var(--color-background-primary)", borderRadius: 8, padding: 10, border: "1px solid #fed7d7" }}>
+              <div style={{ fontSize: 12, fontWeight: 500, color: "#c53030", marginBottom: 8 }}>NO Branch</div>
+              {inp("NO label text", "no_label", { placeholder: "NO" })}
+              {sel("NO branch action", "no_action", actionOpts)}
+              {form.no_action === "new" && (
+                <>
+                  {sel("New shape type", "no_shape", nonDiamondOpts)}
+                  {sel("Column", "no_col", colOpts)}
+                  {inp("Text in new NO step", "no_text")}
+                </>
+              )}
+              {form.no_action === "loop" && (
+                <>
+                  {sel("Loop back to step", "no_loop_to", [{ value: "", label: "— select —" }, ...stepOpts])}
+                  {inp("Loop label", "no_loop_label", { placeholder: "NO" })}
+                </>
+              )}
+              {form.no_action === "join" && (
+                <>
+                  {sel("Join step", "no_join_step", [{ value: "", label: "— select —" }, ...stepOpts])}
+                  {sel("Arrow side", "no_join_side", sideOpts)}
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      <div style={{ borderTop: "1px solid var(--color-border-tertiary)", margin: "12px 0 10px", paddingTop: 10, fontWeight: 500, fontSize: 12, color: "var(--color-text-secondary)" }}>Side column data (optional)</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 10px" }}>
+        {inp("Input label", "input_label")}
+        {inp("Output label", "output_label")}
+        {inp("Responsible", "responsible")}
+        {inp("Doc. Format", "doc_format")}
+        {inp("Measurement", "measurement")}
+      </div>
+
+      <button onClick={handleAdd} style={{ marginTop: 8, width: "100%", padding: "9px 0", borderRadius: 8, background: "#2B6CB0", color: "white", border: "none", cursor: "pointer", fontSize: 13, fontWeight: 500 }}>
+        + Add Step{isDiamond && form.yes_action === "new" && form.yes_text ? " (+ YES branch)" : ""}{isDiamond && form.no_action === "new" && form.no_text ? " (+ NO branch)" : ""}
+      </button>
+    </div>
+  );
+}
+
+// ── Step Card ─────────────────────────────────────────────────────────────────
+function StepCard({ step, idx, total, onChange, onDelete, onMove }) {
+  const [open, setOpen] = useState(false);
+  const cl = COLORS[step.shape] || COLORS.rect;
+  const shapeLabel = SHAPES[step.shape] || step.shape;
+
+  const field = (label, key) => (
+    <div style={{ marginBottom: 6 }}>
+      <label style={{ display: "block", fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 2 }}>{label}</label>
+      <input value={step[key] || ""} onChange={e => onChange(idx, key, e.target.value)}
+        style={{ width: "100%", fontSize: 12, padding: "4px 7px", borderRadius: 5, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)", boxSizing: "border-box" }} />
+    </div>
+  );
+
+  return (
+    <div style={{ background: "var(--color-background-primary)", border: "1px solid var(--color-border-tertiary)", borderRadius: 10, marginBottom: 8, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", padding: "8px 12px", cursor: "pointer", gap: 8 }} onClick={() => setOpen(o => !o)}>
+        <div style={{ width: 22, height: 22, borderRadius: 4, background: cl.stroke, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "white" }}>{idx + 1}</span>
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-primary)" }}>{step.text || "(no text)"}</span>
+          <span style={{ fontSize: 10, color: "var(--color-text-secondary)", marginLeft: 6 }}>[{shapeLabel}] {step.column === "right" ? "→ branch" : ""}</span>
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={e => { e.stopPropagation(); onMove(idx, -1); }} disabled={idx === 0} style={{ padding: "2px 6px", fontSize: 11, borderRadius: 4, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-secondary)", cursor: "pointer", opacity: idx === 0 ? 0.4 : 1 }}>↑</button>
+          <button onClick={e => { e.stopPropagation(); onMove(idx, 1); }} disabled={idx === total - 1} style={{ padding: "2px 6px", fontSize: 11, borderRadius: 4, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-secondary)", cursor: "pointer", opacity: idx === total - 1 ? 0.4 : 1 }}>↓</button>
+          <button onClick={e => { e.stopPropagation(); onDelete(idx); }} style={{ padding: "2px 6px", fontSize: 11, borderRadius: 4, border: "1px solid #fed7d7", background: "#fff5f5", color: "#c53030", cursor: "pointer" }}>✕</button>
+        </div>
+        <span style={{ fontSize: 10, color: "var(--color-text-secondary)" }}>{open ? "▲" : "▼"}</span>
+      </div>
+
+      {open && (
+        <div style={{ padding: "10px 12px", borderTop: "1px solid var(--color-border-tertiary)", background: "var(--color-background-secondary)" }}>
+          {field("Text", "text")}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 8px" }}>
+            <div>
+              <label style={{ display: "block", fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 2 }}>Shape</label>
+              <select value={step.shape} onChange={e => onChange(idx, "shape", e.target.value)} style={{ width: "100%", fontSize: 12, padding: "4px 7px", borderRadius: 5, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)" }}>
+                {Object.entries(SHAPES).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 2 }}>Column</label>
+              <select value={step.column} onChange={e => onChange(idx, "column", e.target.value)} style={{ width: "100%", fontSize: 12, padding: "4px 7px", borderRadius: 5, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)" }}>
+                <option value="left">Left (main)</option>
+                <option value="right">Right (branch)</option>
+              </select>
+            </div>
+            {field("Arrow label", "arrow_label")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 8px" }}>
+            {field("Connect from step #", "connect_from")}
+            <div>
+              <label style={{ display: "block", fontSize: 11, color: "var(--color-text-secondary)", marginBottom: 2 }}>Arrow side</label>
+              <select value={step.connect_side || "bottom"} onChange={e => onChange(idx, "connect_side", e.target.value)} style={{ width: "100%", fontSize: 12, padding: "4px 7px", borderRadius: 5, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-primary)", color: "var(--color-text-primary)" }}>
+                <option value="bottom">Bottom</option>
+                <option value="right">Right →</option>
+                <option value="left">Left ←</option>
+              </select>
+            </div>
+            {field("Loop-back to step #", "loop_to")}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: "0 8px" }}>
+            {field("Input label", "input_label")}
+            {field("Output label", "output_label")}
+            {field("Responsible", "responsible")}
+            {field("Doc. Format", "doc_format")}
+            {field("Measurement", "measurement")}
+          </div>
+          {step.shape === "diamond" && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 8px" }}>
+              {field("YES label", "yes_label")}
+              {field("NO label", "no_label")}
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: "var(--color-text-secondary)", marginTop: 4 }}>
+            cf={step.connect_from || "auto"} | side={step.connect_side || "bottom"} | loop={step.loop_to || "—"} | col={step.column}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Reference Table ───────────────────────────────────────────────────────────
+function ReferenceTable({ steps }) {
+  if (!steps.length) return null;
+  return (
+    <div style={{ marginTop: 16, overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
+        <thead>
+          <tr style={{ background: "var(--color-background-secondary)" }}>
+            {["#", "Shape", "Column", "Text", "From", "Side", "Label", "Loop to", "Loop lbl"].map(h => (
+              <th key={h} style={{ padding: "5px 8px", textAlign: "left", border: "1px solid var(--color-border-tertiary)", fontWeight: 500, color: "var(--color-text-secondary)" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {steps.map((s, i) => (
+            <tr key={s.id} style={{ background: i % 2 === 0 ? "var(--color-background-primary)" : "var(--color-background-secondary)" }}>
+              <td style={{ padding: "4px 8px", border: "1px solid var(--color-border-tertiary)", fontWeight: 500 }}>{i}</td>
+              <td style={{ padding: "4px 8px", border: "1px solid var(--color-border-tertiary)" }}>{s.shape}</td>
+              <td style={{ padding: "4px 8px", border: "1px solid var(--color-border-tertiary)" }}>{s.column}</td>
+              <td style={{ padding: "4px 8px", border: "1px solid var(--color-border-tertiary)", maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.text}</td>
+              <td style={{ padding: "4px 8px", border: "1px solid var(--color-border-tertiary)" }}>{s.connect_from !== "" ? s.connect_from : "auto"}</td>
+              <td style={{ padding: "4px 8px", border: "1px solid var(--color-border-tertiary)" }}>{s.connect_side || "bottom"}</td>
+              <td style={{ padding: "4px 8px", border: "1px solid var(--color-border-tertiary)" }}>{s.arrow_label || "—"}</td>
+              <td style={{ padding: "4px 8px", border: "1px solid var(--color-border-tertiary)" }}>{s.loop_to || "—"}</td>
+              <td style={{ padding: "4px 8px", border: "1px solid var(--color-border-tertiary)" }}>{s.loop_label || "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── JSON Export Panel ─────────────────────────────────────────────────────────
+function ExportPanel({ steps }) {
+  const [copied, setCopied] = useState(false);
+  const json = JSON.stringify(steps.map((s, i) => ({
+    shape: s.shape, text: s.text, column: s.column,
+    connect_from: s.connect_from !== "" ? s.connect_from : null,
+    connect_side: s.connect_side || "bottom (default)",
+    arrow_label: s.arrow_label || "",
+    loop_to: s.loop_to !== "" ? s.loop_to : null,
+    loop_label: s.loop_label || "",
+    input_label: s.input_label || "", output_label: s.output_label || "",
+    responsible: s.responsible || "", doc_format: s.doc_format || "",
+    measurement: s.measurement || "",
+    yes_label: s.yes_label || "YES", no_label: s.no_label || "NO",
+  })), null, 2);
+
+  const copy = () => { navigator.clipboard.writeText(json); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+        <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>JSON for Streamlit session_state.steps</span>
+        <button onClick={copy} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 6, border: "1px solid var(--color-border-tertiary)", background: copied ? "#f0fff4" : "var(--color-background-secondary)", color: copied ? "#276749" : "var(--color-text-primary)", cursor: "pointer" }}>
+          {copied ? "Copied!" : "Copy JSON"}
+        </button>
+      </div>
+      <textarea readOnly value={json} style={{ width: "100%", height: 200, fontSize: 11, fontFamily: "monospace", borderRadius: 8, border: "1px solid var(--color-border-tertiary)", padding: 10, background: "var(--color-background-secondary)", color: "var(--color-text-primary)", boxSizing: "border-box", resize: "vertical" }} />
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+export default function SOPFlowBuilder() {
+  const [steps, setSteps] = useState([]);
+  const [activeTab, setActiveTab] = useState("build");
+  const [zoom, setZoom] = useState(1);
+
+  const handleAdd = useCallback((newSteps) => {
+    setSteps(prev => [...prev, ...newSteps]);
+  }, []);
+
+  const handleChange = useCallback((idx, key, val) => {
+    setSteps(prev => prev.map((s, i) => i === idx ? { ...s, [key]: val } : s));
+  }, []);
+
+  const handleDelete = useCallback((idx) => {
+    setSteps(prev => prev.filter((_, i) => i !== idx));
+  }, []);
+
+  const handleMove = useCallback((idx, dir) => {
+    setSteps(prev => {
+      const arr = [...prev];
+      const ni = idx + dir;
+      if (ni < 0 || ni >= arr.length) return arr;
+      [arr[idx], arr[ni]] = [arr[ni], arr[idx]];
+      return arr;
+    });
+  }, []);
+
+  const tabs = [
+    { id: "build", label: "Build Steps" },
+    { id: "preview", label: `Preview (${steps.length})` },
+    { id: "ref", label: "Step Reference" },
+    { id: "export", label: "Export JSON" },
+  ];
+
+  return (
+    <div style={{ fontFamily: "'Segoe UI', sans-serif", color: "var(--color-text-primary)" }}>
+      <h2 style={{ fontSize: 16, fontWeight: 500, margin: "0 0 4px", color: "var(--color-text-primary)" }}>Manual Process Flow Builder</h2>
+      <p style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 14 }}>
+        Build complex SOP flowcharts with decisions, branches, loops, and multi-column layout. Step indices are 0-based when entering "connect from" and "loop to" numbers.
+      </p>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: "1px solid var(--color-border-tertiary)", paddingBottom: 0 }}>
+        {tabs.map(t => (
+          <button key={t.id} onClick={() => setActiveTab(t.id)} style={{ padding: "7px 16px", fontSize: 12, borderRadius: "8px 8px 0 0", border: "1px solid var(--color-border-tertiary)", borderBottom: activeTab === t.id ? "2px solid #2B6CB0" : "1px solid var(--color-border-tertiary)", background: activeTab === t.id ? "var(--color-background-primary)" : "var(--color-background-secondary)", color: activeTab === t.id ? "#2B6CB0" : "var(--color-text-secondary)", cursor: "pointer", fontWeight: activeTab === t.id ? 500 : 400 }}>
+            {t.label}
+          </button>
+        ))}
+        {steps.length > 0 && (
+          <button onClick={() => setSteps([])} style={{ marginLeft: "auto", padding: "6px 14px", fontSize: 11, borderRadius: 6, border: "1px solid #fed7d7", background: "#fff5f5", color: "#c53030", cursor: "pointer" }}>
+            Clear all
+          </button>
+        )}
+      </div>
+
+      {activeTab === "build" && (
+        <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 16 }}>
+          <div>
+            <StepForm steps={steps} onAdd={handleAdd} />
+            {/* Quick legend */}
+            <div style={{ marginTop: 14, background: "var(--color-background-secondary)", borderRadius: 8, padding: "10px 12px", fontSize: 11, color: "var(--color-text-secondary)" }}>
+              <div style={{ fontWeight: 500, marginBottom: 6 }}>Tips for complex flows (like in the image):</div>
+              <div style={{ marginBottom: 3 }}>• Step indices are 0-based: first step = 0, second = 1, etc.</div>
+              <div style={{ marginBottom: 3 }}>• Use "connect from step #" to wire arrows from decisions to branch steps</div>
+              <div style={{ marginBottom: 3 }}>• "right" column = branch column; "left" = main flow</div>
+              <div style={{ marginBottom: 3 }}>• For loops (No → back to earlier step), use "loop-back to step #"</div>
+              <div style={{ marginBottom: 3 }}>• Check "Step Reference" tab to see all step indices at a glance</div>
+            </div>
+          </div>
+          <div>
+            <div style={{ fontWeight: 500, fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>
+              Steps ({steps.length}) — click to expand & edit
+            </div>
+            {steps.length === 0 && <div style={{ color: "var(--color-text-secondary)", fontSize: 12, padding: "20px 0" }}>No steps yet. Use the form to add your first step.</div>}
+            {steps.map((s, i) => (
+              <StepCard key={s.id} step={s} idx={i} total={steps.length} onChange={handleChange} onDelete={handleDelete} onMove={handleMove} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {activeTab === "preview" && (
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+            <button onClick={() => setZoom(z => Math.max(0.4, z - 0.1))} style={{ padding: "4px 10px", fontSize: 13, borderRadius: 6, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-secondary)", cursor: "pointer" }}>−</button>
+            <span style={{ fontSize: 12, color: "var(--color-text-secondary)", minWidth: 44, textAlign: "center" }}>{Math.round(zoom * 100)}%</span>
+            <button onClick={() => setZoom(z => Math.min(2.5, z + 0.1))} style={{ padding: "4px 10px", fontSize: 13, borderRadius: 6, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-secondary)", cursor: "pointer" }}>+</button>
+            <button onClick={() => setZoom(1)} style={{ padding: "4px 10px", fontSize: 12, borderRadius: 6, border: "1px solid var(--color-border-tertiary)", background: "var(--color-background-secondary)", cursor: "pointer" }}>Reset</button>
+          </div>
+          <div style={{ overflowX: "auto", overflowY: "auto", maxHeight: 700, border: "1px solid var(--color-border-tertiary)", borderRadius: 10, padding: 12, background: "#FAFBFC" }}>
+            <div style={{ transform: `scale(${zoom})`, transformOrigin: "top left", display: "inline-block" }}>
+              <FlowSVG steps={steps} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "ref" && (
+        <div>
+          <p style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 8 }}>
+            Use the # column (0-based) when filling in "Connect from step #" and "Loop-back to step #" fields.
+          </p>
+          <ReferenceTable steps={steps} />
+        </div>
+      )}
+
+      {activeTab === "export" && (
+        <div>
+          <p style={{ fontSize: 12, color: "var(--color-text-secondary)", marginBottom: 12 }}>
+            Copy this JSON and paste it into your Streamlit app to replace <code>st.session_state.steps</code>.
+          </p>
+          {steps.length === 0 ? <div style={{ color: "var(--color-text-secondary)", fontSize: 12 }}>No steps to export yet.</div> : <ExportPanel steps={steps} />}
+        </div>
+      )}
+    </div>
+  );
+}
