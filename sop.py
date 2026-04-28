@@ -148,7 +148,7 @@ def generate_steps_with_ai(description):
         sanitize_step(step)
     return parsed
 
-# ─── SVG Preview (NO OVERLAPS — fixed geometry) ───────────────────────────────
+# ─── SVG Preview ──────────────────────────────────────────────────────────────
 def generate_svg_preview(steps):
     if not steps:
         return """<div style="display:flex;align-items:center;justify-content:center;height:200px;
@@ -381,7 +381,7 @@ function zoom(d){{s=Math.max(0.3,Math.min(3,s+d));document.getElementById('si').
 function resetZoom(){{s=1;document.getElementById('si').style.transform='scale(1)';document.getElementById('zl').textContent='100%';}}
 </script></body></html>"""
 
-# ─── PDF Generation — UPDATED FONT SIZES (all bumped to 10-11pt minimum) ─────
+# ─── PDF Generation ────────────────────────────────────────────────────────────
 def wrapped_lines_pdf(c, text, max_w, fn, fs):
     words=str(text).split(); lines=[]; cur=""
     for w in words:
@@ -394,18 +394,15 @@ def wrapped_lines_pdf(c, text, max_w, fn, fs):
     return lines or [""]
 
 def draw_ctext(c, text, cx, cy, max_w, fn="Helvetica", fs=10, col=colors.black):
-    """Draw centred text, vertically centred around cy (cy is the cell mid-point)."""
     lines = wrapped_lines_pdf(c, text, max_w, fn, fs)
-    lh = fs * 1.2          # line height ≈ 120 % of font size
+    lh = fs * 1.2
     block_h = len(lines) * lh
-    # Start of first baseline: cy + half block - one leading (so block straddles cy)
-    y0 = cy + block_h / 2 - lh + lh * 0.25   # 0.25 = descender allowance
+    y0 = cy + block_h / 2 - lh + lh * 0.25
     c.setFont(fn, fs); c.setFillColor(col)
     for i, ln in enumerate(lines):
         c.drawCentredString(cx, y0 - i * lh, ln)
 
 def draw_ltext(c, text, x, cy, max_w, fn="Helvetica", fs=10, col=colors.black):
-    """Draw left-aligned text, vertically centred around cy."""
     lines = wrapped_lines_pdf(c, text, max_w, fn, fs)
     lh = fs * 1.2
     block_h = len(lines) * lh
@@ -432,7 +429,6 @@ def pdf_elbow(c, sx,sy, ex,ey, col=colors.black, lbl="", lbl_col=colors.black):
     if ey<sy: c.line(ex,sy,ex,ey+2.5*1.5); arrow_head(c,ex,ey,"down")
     else:     c.line(ex,sy,ex,ey-2.5*1.5); arrow_head(c,ex,ey,"up")
     if lbl:
-        # ── UPDATED: arrow label font size 9 (was 6.5) ──
         c.setFont("Helvetica-Bold",9); c.setFillColor(lbl_col)
         c.drawCentredString((sx+ex)/2,sy+2,lbl)
     c.setStrokeColor(colors.black); c.setFillColor(colors.black)
@@ -467,9 +463,6 @@ def generate_pdf(steps, meta):
     TW=PW-ML-MR
     cur_y=PH-MT
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # HEADER
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     HDR_H = 30*mm
     LOGO_W = 52*mm
     TITLE_W = 95*mm
@@ -480,8 +473,6 @@ def generate_pdf(steps, meta):
     c.line(ML+LOGO_W, cur_y-HDR_H, ML+LOGO_W, cur_y)
     c.line(ML+LOGO_W+TITLE_W, cur_y-HDR_H, ML+LOGO_W+TITLE_W, cur_y)
 
-    # ── Left: Company name + Logo ────────────────────────────────────────────
-    # UPDATED: company name font size 11 (was 9)
     c.setFont("Helvetica-Bold", 11); c.setFillColor(colors.black)
     c.drawString(ML+4, cur_y-10, meta["company_name"])
 
@@ -496,18 +487,15 @@ def generate_pdf(steps, meta):
         except Exception:
             pass
     else:
-        # UPDATED: "eka" fallback font size 22 (was 20)
         c.setFont("Helvetica-Bold", 22); c.setFillColor(colors.HexColor("#1a6dcc"))
         eka_y = cur_y - HDR_H/2 - 5
         c.drawString(ML+4, eka_y, "eka")
         c.setFillColor(colors.black)
 
-    # ── Centre: Title ────────────────────────────────────────────────────────
     title_cx  = ML + LOGO_W + TITLE_W / 2
     cell_top  = cur_y
     cell_bot  = cur_y - HDR_H
 
-    # UPDATED: SOP heading font size 15 (was 13), subtitle font size 11 (was 9)
     SOP_FS   = 14
     SUB_FS   = 11
     SUB_LH   = SUB_FS + 2
@@ -527,7 +515,6 @@ def generate_pdf(steps, meta):
     for i, ln in enumerate(sub_lines):
         c.drawCentredString(title_cx, sub_y0 - SUB_LH * 0.80 - i * SUB_LH, ln)
 
-    # ── Right: Meta grid ─────────────────────────────────────────────────────
     RX = ML+LOGO_W+TITLE_W
     rh = HDR_H/4
     meta_rows=[
@@ -545,16 +532,12 @@ def generate_pdf(steps, meta):
             c.setFillColor(colors.HexColor("#D6E8F7") if is_lbl else colors.white)
             c.setStrokeColor(colors.black); c.setLineWidth(0.4)
             c.rect(xs[ci],ry,cw,rh,fill=1,stroke=1); c.setFillColor(colors.black)
-            # UPDATED: label font 9, value font 9 (was 7 / 7.5)
             fn="Helvetica-Bold" if is_lbl else "Helvetica"; fs=11
             draw_ltext(c,txt,xs[ci]+2,ry+rh/2,cw-3,fn,fs)
     cur_y -= HDR_H
     cur_y -= 3*mm
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # PURPOSE & SCOPE row
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    PS_H=12*mm   # slightly taller row to accommodate larger text
+    PS_H=12*mm
     PL_W=20*mm; PV_W=80*mm; SL_W=16*mm; SV_W=TW-PL_W-PV_W-SL_W
     c.setLineWidth(0.6)
     for x,w,txt,is_lbl in [
@@ -567,16 +550,12 @@ def generate_pdf(steps, meta):
         c.rect(x,cur_y-PS_H,w,PS_H,fill=1,stroke=1); c.setFillColor(colors.black)
         if is_lbl:
             c.setFont("Helvetica-Bold",11)
-            # vertically centre the single label in the cell
             c.drawString(x+3, cur_y - PS_H/2 - 11*0.3, txt)
         else:
             draw_ltext(c,txt,x+3,cur_y-PS_H/2,w-5,fs=10)
     cur_y -= PS_H
     cur_y -= 3*mm
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # PROCESS STEPS TABLE
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     COL_IN   = 24*mm
     COL_OUT  = 22*mm
     COL_RESP = 26*mm
@@ -600,20 +579,16 @@ def generate_pdf(steps, meta):
     SH_W_L   = FLOW_W * 0.40
     SH_W_R   = FLOW_W * 0.36
 
-    # ── "Process Steps:" banner ───────────────────────────────────────────────
-    HDR1_H=8*mm   # slightly taller for bigger font
+    HDR1_H=8*mm
     c.setFillColor(colors.HexColor("#BDD7EE"))
     c.rect(ML,cur_y-HDR1_H,TW,HDR1_H,fill=1,stroke=1)
-    # UPDATED: banner font 11 (was 10)
     c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
-    # vertically centre text in the banner row
     _banner_y = cur_y - HDR1_H/2 - 11*0.3
     c.drawString(ML+3, _banner_y, "Process Steps:")
     c.drawString(XS[2]+3, _banner_y, f"OWNER :   {meta['owner']}")
     cur_y -= HDR1_H
 
-    # ── Column headers ────────────────────────────────────────────────────────
-    HDR2_H=11*mm   # taller for bigger font
+    HDR2_H=11*mm
     hdr_labels=["Input","Process Flow","Output","Responsible","Doc. Format /\nSystem","Effective\nMeasurement"]
     for i,label in enumerate(hdr_labels):
         cw=XS[i+1]-XS[i]
@@ -629,12 +604,10 @@ def generate_pdf(steps, meta):
             c.drawCentredString(XS[i]+cw/2, y0 - li*lh, ln)
     cur_y -= HDR2_H
 
-    # ── Shape heights in PDF — taller to fit bigger text ─────────────────────
     SH_H_PDF={"rect":12*mm,"oval":10*mm,"parallelogram":12*mm,"diamond":18*mm,"arrow_text":7*mm}
     V_PAD=3*mm
     TABLE_TOP=cur_y
 
-    # ── Pair steps into rows ──────────────────────────────────────────────────
     rows=[]; step_to_row={}
     for idx,step in enumerate(steps):
         col=step.get("column","left")
@@ -648,7 +621,6 @@ def generate_pdf(steps, meta):
         else:
             rows.append({"left":idx,"right":None}); step_to_row[idx]=len(rows)-1
 
-    # ── Compute row geometries ────────────────────────────────────────────────
     row_geom=[]; sy2=cur_y
     for row in rows:
         hl=SH_H_PDF.get(steps[row["left"]]["shape"],12*mm)  if row["left"]  is not None else 0
@@ -657,7 +629,6 @@ def generate_pdf(steps, meta):
         ry=sy2-ROW_H; row_geom.append({"ry":ry,"ROW_H":ROW_H}); sy2=ry
     TABLE_BOTTOM=sy2
 
-    # ── Draw outer table border + vertical col lines ──────────────────────────
     TBL_H=TABLE_TOP-TABLE_BOTTOM
     c.setFillColor(colors.white); c.rect(ML,TABLE_BOTTOM,TW,TBL_H,fill=1,stroke=0)
     c.setStrokeColor(colors.black); c.setLineWidth(0.8)
@@ -670,7 +641,6 @@ def generate_pdf(steps, meta):
         c.line(XS[0],y,XS[1],y)
         c.line(XS[2],y,XS[-1],y)
 
-    # ── Compute anchors ───────────────────────────────────────────────────────
     anchors={}
     for idx,step in enumerate(steps):
         ri=step_to_row[idx]; rg=row_geom[ri]; ry,ROW_H=rg["ry"],rg["ROW_H"]
@@ -686,7 +656,6 @@ def generate_pdf(steps, meta):
 
     GREEN=colors.HexColor("#006600"); RED=colors.HexColor("#CC0000"); BLUE=colors.HexColor("#1a6dcc")
 
-    # ── Draw side-column text ─────────────────────────────────────────────────
     for pi,row in enumerate(rows):
         rg=row_geom[pi]; ry,ROW_H=rg["ry"],rg["ROW_H"]
         ref=row["left"] if row["left"] is not None else row["right"]
@@ -695,10 +664,8 @@ def generate_pdf(steps, meta):
             txt=(step.get(key) or "")
             if txt:
                 cw=XS[ci+1]-XS[ci]
-                # UPDATED: side column text font 10 (was 8)
                 draw_ctext(c,txt,XS[ci]+cw/2,ry+ROW_H/2,cw-3,fs=10)
 
-    # ── Draw arrows ───────────────────────────────────────────────────────────
     for idx,step in enumerate(steps):
         a=anchors[idx]
         cf=str(step.get("connect_from") or "")
@@ -721,7 +688,6 @@ def generate_pdf(steps, meta):
                     if abs(s["cx"]-a["cx"])<2:
                         pdf_arrow_down(c,a["cx"],s["bot"],a["top"],col=ac)
                         if lbl:
-                            # UPDATED: inline arrow label font 9 (was 6.5)
                             c.setFont("Helvetica-Bold",9); c.setFillColor(ac)
                             c.drawCentredString(a["cx"]+5,(s["bot"]+a["top"])/2,lbl)
                             c.setFillColor(colors.black)
@@ -743,13 +709,11 @@ def generate_pdf(steps, meta):
             c.line(margin,dest["cy"],dest["left"]-sz*1.5,dest["cy"])
             arrow_head(c,dest["left"],dest["cy"],"right")
             if ll:
-                # UPDATED: loop label font 8 (was 6)
                 c.setFont("Helvetica-Bold",8); c.setFillColor(lc)
                 c.drawString(margin+1,(a["cy"]+dest["cy"])/2+1,ll)
                 c.setFillColor(colors.black)
             c.setStrokeColor(colors.black)
 
-    # ── Draw shapes — AFTER arrows ────────────────────────────────────────────
     for idx,step in enumerate(steps):
         a=anchors[idx]
         sh_x,sh_bot=a["sh_x"],a["sh_bot"]; sh_w,sh_h=a["sh_w"],a["sh_h"]
@@ -761,28 +725,21 @@ def generate_pdf(steps, meta):
         elif shape=="parallelogram": draw_para(c,sh_x,sh_bot,sh_w,sh_h,txt)
         elif shape=="diamond":
             draw_diamond(c,sh_x,sh_bot,sh_w,sh_h,txt)
-            # UPDATED: YES/NO labels font 9 (was 7)
             c.setFont("Helvetica-Bold",9); c.setFillColor(GREEN)
             c.drawString(sh_x+sh_w+2,a["cy"]-2,yl)
             nw=c.stringWidth(nl,"Helvetica-Bold",9); c.setFillColor(RED)
             c.drawString(sh_x-nw-4,a["cy"]-2,nl); c.setFillColor(colors.black)
         elif shape=="arrow_text":
-            # UPDATED: annotation font 9 (was 7.5)
             c.setFont("Helvetica-Oblique",9); c.setFillColor(colors.HexColor("#333333"))
             c.drawCentredString(a["cx"],a["cy"],txt); c.setFillColor(colors.black)
 
     cur_y=TABLE_BOTTOM
 
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # CHANGE RECORD
-    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     cur_y -= 3*mm
-    CR_TH=8*mm   # taller banner
+    CR_TH=8*mm
     c.setFillColor(colors.HexColor("#BDD7EE"))
     c.rect(ML,cur_y-CR_TH,TW,CR_TH,fill=1,stroke=1)
-    # UPDATED: Change Record banner font 11 (was 9)
     c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
-    # vertically centre banner text
     c.drawCentredString(ML+TW/2, cur_y - CR_TH/2 - 11*0.3, "SOP Change Record")
     cur_y-=CR_TH
 
@@ -793,7 +750,7 @@ def generate_pdf(steps, meta):
     CR_XS=[ML]
     for w in CR_W: CR_XS.append(CR_XS[-1]+w)
 
-    CR_HH=9*mm   # taller header row
+    CR_HH=9*mm
     for i,lbl in enumerate(CR_COLS):
         cw=CR_XS[i+1]-CR_XS[i]
         c.setFillColor(colors.HexColor("#D6E8F7"))
@@ -808,7 +765,7 @@ def generate_pdf(steps, meta):
             c.drawCentredString(CR_XS[i]+cw/2, y0 - li*lh_cr, ln)
     cur_y-=CR_HH
 
-    CR_RH=8*mm   # taller data rows
+    CR_RH=8*mm
     for row in meta.get("change_records",[]):
         vals=[row.get("sno",""),row.get("date",""),row.get("rev",""),row.get("desc",""),
               row.get("change_letter",""),row.get("prepared",""),row.get("reviewed",""),row.get("approved","")]
@@ -817,14 +774,12 @@ def generate_pdf(steps, meta):
             c.setFillColor(colors.white); c.rect(CR_XS[i],cur_y-CR_RH,cw,CR_RH,fill=1,stroke=1)
             draw_ctext(c,val,CR_XS[i]+cw/2,cur_y-CR_RH/2,cw-3,fs=9)
         cur_y-=CR_RH
-    # 2 blank rows
     for _ in range(2):
         for i in range(len(CR_COLS)):
             cw=CR_XS[i+1]-CR_XS[i]
             c.setFillColor(colors.white); c.rect(CR_XS[i],cur_y-CR_RH,cw,CR_RH,fill=1,stroke=1)
         cur_y-=CR_RH
 
-    # "Composed By" — give it clear breathing room below the table
     cur_y -= 5*mm
     c.setFont("Helvetica-Oblique",9); c.setFillColor(colors.HexColor("#555555"))
     c.drawCentredString(ML+TW/2, cur_y, f"Composed By: {meta['composed_by']}")
@@ -839,6 +794,10 @@ h1{font-size:1.3rem;margin-bottom:0.2rem}
 h2{font-size:1.05rem}
 .stButton>button{width:100%}
 .ai-banner{background:linear-gradient(135deg,#E6F4EA,#E8F0FE);border:1.5px solid #34A853;border-radius:10px;padding:12px 16px;margin-bottom:12px;font-size:13px;color:#1a3d2b}
+.step-ref-banner{background:#FFFBEB;border:1px solid #F6E05E;border-radius:6px;padding:6px 12px;font-size:11.5px;color:#744210;margin-bottom:8px}
+.yes-section{background:#F0FFF4;border:1.5px solid #9AE6B4;border-radius:8px;padding:10px 12px;margin-bottom:6px}
+.no-section{background:#FFF5F5;border:1.5px solid #FEB2B2;border-radius:8px;padding:10px 12px;margin-bottom:6px}
+.branch-sub{background:rgba(255,255,255,0.7);border:1px dashed #CBD5E0;border-radius:6px;padding:8px 10px;margin-top:6px}
 </style>""", unsafe_allow_html=True)
 
 st.title("📋 SOP Builder — Standard Operating Procedure")
@@ -917,139 +876,381 @@ with tab2:
                                 st.rerun()
                         except json.JSONDecodeError: st.error("⚠️ AI returned unexpected output. Try rephrasing.")
                         except Exception as e: st.error(f"⚠️ Error: {e}")
+
+        # ══════════════════════════════════════════════════════════
+        # ✏️ MANUAL MODE — FULLY ENHANCED DECISION BUILDER
+        # ══════════════════════════════════════════════════════════
         else:
-            # ── MANUAL MODE ───────────────────────────────────────────────────
+            SHAPE_NO_DIAM = [k for k in SHAPE_TYPES if k != "Decision (Diamond)"]
+
+            # Step index reference banner
+            if st.session_state.steps:
+                refs = "  |  ".join([
+                    f"**{i}** = {(s.get('text') or SHAPE_TYPES.get(s.get('shape',''),''))[:20]}"
+                    for i, s in enumerate(st.session_state.steps)
+                ])
+                st.markdown(f'<div class="step-ref-banner">📌 <b>Step index (0-based):</b> {refs}</div>',
+                            unsafe_allow_html=True)
+
             def step_opts():
-                return [f"Step {i+1}: {st.session_state.steps[i].get('text','')[:40]}"
+                return [f"Step {i} : {st.session_state.steps[i].get('text','')[:40]}"
                         for i in range(len(st.session_state.steps))]
 
-            shape_label=st.selectbox("🔷 Shape Type",list(SHAPE_TYPES.keys()),key="shape_sel")
-            is_diamond=(shape_label=="Decision (Diamond)")
+            def idx_from_opt(opt_str):
+                try: return int(opt_str.split("Step ")[1].split(" :")[0])
+                except: return None
 
-            SHAPE_NO_DIAM=[k for k in SHAPE_TYPES if k!="Decision (Diamond)"]
+            shape_label = st.selectbox("🔷 Shape Type", list(SHAPE_TYPES.keys()), key="shape_sel")
+            is_diamond  = (shape_label == "Decision (Diamond)")
 
-            with st.form("add_step_form",clear_on_submit=True):
-                fc,ft=st.columns([2,3])
-                with fc: col_choice=st.selectbox("Column",COLUMN_OPTIONS)
-                with ft: step_text=st.text_input("Text inside shape *",placeholder="e.g. Start, Check Quality…")
+            BRANCH_ACTIONS = [
+                "➕ Add new shape",
+                "↩️ Loop back to existing step",
+                "🔗 Join / connect to existing step",
+                "— None —",
+            ]
 
-                if is_diamond:
-                    st.markdown("### 🔀 Branch Configuration")
-                    BRANCH_OPTS=["➕ Add new shape (left)","➕ Add new shape (right branch)",
-                                 "↩️ Loop back to existing step","🔗 Join existing step"]
-                    yc,nc=st.columns(2); opts=step_opts(); no_steps=(len(opts)==0)
-                    with yc:
-                        st.markdown("#### ✅ YES Branch")
-                        yes_lbl=st.text_input("YES label","YES",key="f_yes_lbl")
-                        yes_flow=st.selectbox("YES goes to",BRANCH_OPTS,key="f_yf")
-                        yes_new_shape=yes_new_text=yes_loop_to=yes_loop_lbl=yes_join_step=yes_join_side=""
-                        if yes_flow.startswith("➕"):
-                            ysl=st.selectbox("Shape",SHAPE_NO_DIAM,key="f_ysl")
-                            yes_new_shape=SHAPE_TYPES[ysl]
-                            yes_new_text=st.text_input("Text in YES step",key="f_yt")
-                        elif yes_flow.startswith("↩️"):
-                            if no_steps: st.info("No steps yet.")
-                            else:
-                                sel=st.selectbox("Loop back to",opts,key="f_yls")
-                                yes_loop_to=str(opts.index(sel))
-                            yes_loop_lbl=st.text_input("Loop label","YES",key="f_yll")
-                        elif yes_flow.startswith("🔗"):
-                            if no_steps: st.info("No steps yet.")
-                            else:
-                                sel=st.selectbox("Join step",opts,key="f_yjs")
-                                yes_join_step=str(opts.index(sel))
-                            yes_join_side=st.selectbox("Arrow side",CONNECT_SIDE_OPTIONS,key="f_yjsi")
-                    with nc:
-                        st.markdown("#### ❌ NO Branch")
-                        no_lbl=st.text_input("NO label","NO",key="f_no_lbl")
-                        no_flow=st.selectbox("NO goes to",BRANCH_OPTS,key="f_nf")
-                        no_new_shape=no_new_text=no_loop_to=no_loop_lbl=no_join_step=no_join_side=""
-                        if no_flow.startswith("➕"):
-                            nsl=st.selectbox("Shape",SHAPE_NO_DIAM,key="f_nsl")
-                            no_new_shape=SHAPE_TYPES[nsl]
-                            no_new_text=st.text_input("Text in NO step",key="f_nt")
-                        elif no_flow.startswith("↩️"):
-                            if no_steps: st.info("No steps yet.")
-                            else:
-                                sel=st.selectbox("Loop back to",opts,key="f_nls")
-                                no_loop_to=str(opts.index(sel))
-                            no_loop_lbl=st.text_input("Loop label","NO",key="f_nll")
-                        elif no_flow.startswith("🔗"):
-                            if no_steps: st.info("No steps yet.")
-                            else:
-                                sel=st.selectbox("Join step",opts,key="f_njs")
-                                no_join_step=str(opts.index(sel))
-                            no_join_side=st.selectbox("Arrow side",CONNECT_SIDE_OPTIONS,key="f_njsi")
-                    st.markdown("**Side-column data (optional)**")
-                    d1,d2,d3=st.columns(3)
-                    d_inp=d1.text_input("Input Label",key="f_di"); d_out=d1.text_input("Output Label",key="f_do")
-                    d_resp=d2.text_input("Responsible",key="f_dr"); d_doc=d2.text_input("Doc Format",key="f_dd")
-                    d_meas=d3.text_input("Measurement",key="f_dm")
-                    st.markdown("**Arrow into this Decision**")
-                    dc1,dc2=st.columns(2)
-                    d_cf=dc1.text_input("Connect from step # (blank=auto)",key="f_dcf")
-                    d_side=dc2.selectbox("Arrow exits source from",CONNECT_SIDE_OPTIONS,key="f_ds")
-                else:
+            with st.form("add_step_form", clear_on_submit=True):
+                fc, ft = st.columns([2, 3])
+                with fc: col_choice = st.selectbox("Column", COLUMN_OPTIONS)
+                with ft: step_text  = st.text_input("Text inside shape *", placeholder="e.g. Start, Check Quality…")
+
+                # ── NON-DIAMOND ──────────────────────────────────────────────
+                if not is_diamond:
                     st.markdown("**Side-column data (optional)**")
                     sc1,sc2,sc3=st.columns(3)
-                    with sc1: input_label=st.text_input("Input Label",key="f_il"); output_label=st.text_input("Output Label",key="f_ol")
-                    with sc2: responsible=st.text_input("Responsible",key="f_re"); doc_format=st.text_input("Doc. Format",key="f_df")
-                    with sc3: measurement=st.text_input("Measurement",key="f_me")
+                    with sc1:
+                        input_label  = st.text_input("Input Label",  key="f_il")
+                        output_label = st.text_input("Output Label", key="f_ol")
+                    with sc2:
+                        responsible = st.text_input("Responsible", key="f_re")
+                        doc_format  = st.text_input("Doc. Format",  key="f_df")
+                    with sc3:
+                        measurement = st.text_input("Measurement", key="f_me")
                     st.markdown("**Arrow / Connection**")
                     a1,a2,a3=st.columns(3)
-                    with a1: connect_from=st.text_input("Connect from step # (blank=auto)",key="f_cf"); connect_side=st.selectbox("Arrow exits from",CONNECT_SIDE_OPTIONS,key="f_cs")
-                    with a2: arrow_label=st.text_input("Arrow label (YES/NO/blank)",key="f_al")
-                    with a3: loop_to=st.text_input("Loop-back to step #",key="f_lt"); loop_label=st.text_input("Loop label",key="f_ll")
+                    with a1:
+                        connect_from = st.text_input("Connect from step # (0-based, blank=auto)", key="f_cf")
+                        connect_side = st.selectbox("Arrow exits from", CONNECT_SIDE_OPTIONS, key="f_cs")
+                    with a2:
+                        arrow_label = st.text_input("Arrow label (YES/NO/blank)", key="f_al")
+                    with a3:
+                        loop_to    = st.text_input("Loop-back to step # (0-based)", key="f_lt")
+                        loop_label = st.text_input("Loop label", key="f_ll")
 
-                submitted=st.form_submit_button("➕ Add Step(s)",use_container_width=True,type="primary")
+                # ── DIAMOND — FULL BRANCH BUILDER ────────────────────────────
+                else:
+                    st.markdown("### 🔀 Decision Branch Configuration")
 
+                    # Arrow INTO this diamond
+                    st.markdown("**Arrow into this diamond**")
+                    dc1, dc2 = st.columns(2)
+                    with dc1:
+                        d_cf   = st.text_input("Connect from step # (0-based, blank=auto)", key="f_dcf")
+                    with dc2:
+                        d_side = st.selectbox("Arrow exits source from", CONNECT_SIDE_OPTIONS, key="f_ds")
+
+                    # YES/NO label customisation
+                    yl_c, nl_c = st.columns(2)
+                    with yl_c: yes_lbl = st.text_input("YES label text", value="YES", key="f_yes_lbl")
+                    with nl_c: no_lbl  = st.text_input("NO label text",  value="NO",  key="f_no_lbl")
+
+                    opts     = step_opts()
+                    no_steps = len(opts) == 0
+
+                    st.markdown("---")
+                    # ── YES BRANCH ──────────────────────────────────────────
+                    st.markdown('<div class="yes-section">', unsafe_allow_html=True)
+                    st.markdown("#### ✅ YES Branch")
+
+                    yes_flow = st.selectbox("YES branch action", BRANCH_ACTIONS, key="f_yf")
+
+                    # initialise all yes vars
+                    yes_new_shape=yes_new_text=yes_new_col=""
+                    yes_new_side="right side →"
+                    yes_loop_to=yes_loop_lbl=""
+                    yes_join_step=yes_join_side=""
+                    # sub-branch vars (after yes new shape)
+                    yes_sub_action=""
+                    yes_sub_shape=yes_sub_text=yes_sub_col=""
+                    yes_sub_loop_to=yes_sub_loop_lbl=""
+
+                    if yes_flow == BRANCH_ACTIONS[0]:   # ➕ Add new shape
+                        y1, y2, y3 = st.columns(3)
+                        with y1:
+                            ysl          = st.selectbox("Shape type", SHAPE_NO_DIAM, key="f_ysl")
+                            yes_new_shape= SHAPE_TYPES[ysl]
+                        with y2:
+                            yes_new_col  = st.selectbox("Column", COLUMN_OPTIONS, key="f_ycol")
+                        with y3:
+                            yes_new_side = st.selectbox("Arrow exits diamond from", CONNECT_SIDE_OPTIONS, key="f_ysd")
+                        yes_new_text = st.text_input("Text in YES shape", key="f_yt")
+
+                        # Sub-action: what happens AFTER this YES shape?
+                        st.markdown('<div class="branch-sub">', unsafe_allow_html=True)
+                        st.markdown("**After this YES shape → next action:**")
+                        yes_sub_action = st.selectbox("YES sub-action", BRANCH_ACTIONS, key="f_ysa")
+
+                        if yes_sub_action == BRANCH_ACTIONS[0]:   # add another shape
+                            ys1, ys2 = st.columns(2)
+                            with ys1:
+                                yssl           = st.selectbox("Sub-shape type", SHAPE_NO_DIAM, key="f_yssl")
+                                yes_sub_shape  = SHAPE_TYPES[yssl]
+                            with ys2:
+                                yes_sub_col    = st.selectbox("Sub-shape column", COLUMN_OPTIONS, key="f_yscol")
+                            yes_sub_text = st.text_input("Sub-shape text", key="f_yst")
+
+                        elif yes_sub_action == BRANCH_ACTIONS[1]: # loop back
+                            if no_steps: st.info("No steps yet to loop back to.")
+                            else:
+                                sel             = st.selectbox("Loop back to", opts, key="f_ysls")
+                                yes_sub_loop_to = str(idx_from_opt(sel)) if idx_from_opt(sel) is not None else ""
+                            yes_sub_loop_lbl = st.text_input("Loop label", value="YES", key="f_ysll")
+
+                        elif yes_sub_action == BRANCH_ACTIONS[2]: # join existing
+                            if no_steps: st.info("No steps yet.")
+                            else:
+                                selj            = st.selectbox("Join step", opts, key="f_ysjs")
+                                yes_sub_loop_to = str(idx_from_opt(selj)) if idx_from_opt(selj) is not None else ""
+                            yes_sub_loop_lbl = st.selectbox("Arrow side", CONNECT_SIDE_OPTIONS, key="f_ysjsd")
+                        st.markdown('</div>', unsafe_allow_html=True)
+
+                    elif yes_flow == BRANCH_ACTIONS[1]: # ↩️ Loop back
+                        if no_steps: st.info("No steps yet to loop back to.")
+                        else:
+                            sel        = st.selectbox("Loop back to step", opts, key="f_yls")
+                            yes_loop_to= str(idx_from_opt(sel)) if idx_from_opt(sel) is not None else ""
+                        yes_loop_lbl = st.text_input("Loop label", value="YES", key="f_yll")
+
+                    elif yes_flow == BRANCH_ACTIONS[2]: # 🔗 Join existing
+                        if no_steps: st.info("No steps yet.")
+                        else:
+                            selj           = st.selectbox("Connect YES to step", opts, key="f_yjs")
+                            yes_join_step  = str(idx_from_opt(selj)) if idx_from_opt(selj) is not None else ""
+                        yes_join_side  = st.selectbox("Arrow exits diamond from", CONNECT_SIDE_OPTIONS, key="f_yjsi")
+
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                    st.markdown("---")
+                    # ── NO BRANCH ──────────────────────────────────────────
+                    st.markdown('<div class="no-section">', unsafe_allow_html=True)
+                    st.markdown("#### ❌ NO Branch")
+
+                    no_flow = st.selectbox("NO branch action", BRANCH_ACTIONS, key="f_nf")
+
+                    # initialise all no vars
+                    no_new_shape=no_new_text=no_new_col=""
+                    no_new_side="left side ←"
+                    no_loop_to=no_loop_lbl=""
+                    no_join_step=no_join_side=""
+                    # sub-branch vars (after no new shape)
+                    no_sub_action=""
+                    no_sub_shape=no_sub_text=no_sub_col=""
+                    no_sub_loop_to=no_sub_loop_lbl=""
+
+                    if no_flow == BRANCH_ACTIONS[0]:    # ➕ Add new shape
+                        n1, n2, n3 = st.columns(3)
+                        with n1:
+                            nsl          = st.selectbox("Shape type", SHAPE_NO_DIAM, key="f_nsl")
+                            no_new_shape = SHAPE_TYPES[nsl]
+                        with n2:
+                            no_new_col   = st.selectbox("Column", COLUMN_OPTIONS, key="f_ncol")
+                        with n3:
+                            no_new_side  = st.selectbox("Arrow exits diamond from", CONNECT_SIDE_OPTIONS, key="f_nsd")
+                        no_new_text = st.text_input("Text in NO shape", key="f_nt")
+
+                        # Sub-action: what happens AFTER this NO shape?
+                        st.markdown('<div class="branch-sub">', unsafe_allow_html=True)
+                        st.markdown("**After this NO shape → next action:**")
+                        no_sub_action = st.selectbox("NO sub-action", BRANCH_ACTIONS, key="f_nsa")
+
+                        if no_sub_action == BRANCH_ACTIONS[0]:    # add another shape
+                            ns1, ns2 = st.columns(2)
+                            with ns1:
+                                nssl          = st.selectbox("Sub-shape type", SHAPE_NO_DIAM, key="f_nssl")
+                                no_sub_shape  = SHAPE_TYPES[nssl]
+                            with ns2:
+                                no_sub_col    = st.selectbox("Sub-shape column", COLUMN_OPTIONS, key="f_nscol")
+                            no_sub_text = st.text_input("Sub-shape text", key="f_nst")
+
+                        elif no_sub_action == BRANCH_ACTIONS[1]:  # loop back
+                            if no_steps: st.info("No steps yet to loop back to.")
+                            else:
+                                sel            = st.selectbox("Loop back to", opts, key="f_nsls")
+                                no_sub_loop_to = str(idx_from_opt(sel)) if idx_from_opt(sel) is not None else ""
+                            no_sub_loop_lbl = st.text_input("Loop label", value="NO", key="f_nsll")
+
+                        elif no_sub_action == BRANCH_ACTIONS[2]:  # join existing
+                            if no_steps: st.info("No steps yet.")
+                            else:
+                                selj           = st.selectbox("Join step", opts, key="f_nsjs")
+                                no_sub_loop_to = str(idx_from_opt(selj)) if idx_from_opt(selj) is not None else ""
+                            no_sub_loop_lbl = st.selectbox("Arrow side", CONNECT_SIDE_OPTIONS, key="f_nsjsd")
+                        st.markdown('</div>', unsafe_allow_html=True)
+
+                    elif no_flow == BRANCH_ACTIONS[1]:  # ↩️ Loop back
+                        if no_steps: st.info("No steps yet to loop back to.")
+                        else:
+                            sel       = st.selectbox("Loop back to step", opts, key="f_nls")
+                            no_loop_to= str(idx_from_opt(sel)) if idx_from_opt(sel) is not None else ""
+                        no_loop_lbl = st.text_input("Loop label", value="NO", key="f_nll")
+
+                    elif no_flow == BRANCH_ACTIONS[2]:  # 🔗 Join existing
+                        if no_steps: st.info("No steps yet.")
+                        else:
+                            selj          = st.selectbox("Connect NO to step", opts, key="f_njs")
+                            no_join_step  = str(idx_from_opt(selj)) if idx_from_opt(selj) is not None else ""
+                        no_join_side  = st.selectbox("Arrow exits diamond from", CONNECT_SIDE_OPTIONS, key="f_njsi")
+
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                    st.markdown("---")
+                    # Side-column data for diamond
+                    st.markdown("**Side-column data (optional)**")
+                    d1,d2,d3=st.columns(3)
+                    d_inp  = d1.text_input("Input Label",  key="f_di")
+                    d_out  = d1.text_input("Output Label", key="f_do")
+                    d_resp = d2.text_input("Responsible",  key="f_dr")
+                    d_doc  = d2.text_input("Doc Format",   key="f_dd")
+                    d_meas = d3.text_input("Measurement",  key="f_dm")
+
+                submitted = st.form_submit_button("➕ Add Step(s)", use_container_width=True, type="primary")
+
+            # ── PROCESS SUBMISSION ───────────────────────────────────────────
             if submitted:
                 if not step_text.strip():
                     st.warning("⚠️ Please enter text for the shape.")
-                elif is_diamond:
-                    d_idx=len(st.session_state.steps)
-                    d_cf_idx=str(int(d_cf.strip())-1) if d_cf.strip().isdigit() else ""
-                    st.session_state.steps.append({
-                        "shape":"diamond","text":step_text.strip(),"column":col_choice,
-                        "input_label":d_inp,"output_label":d_out,"responsible":d_resp,
-                        "doc_format":d_doc,"measurement":d_meas,
-                        "yes_label":yes_lbl or "YES","no_label":no_lbl or "NO",
-                        "connect_from":d_cf_idx,"connect_side":d_side,"arrow_label":"","loop_to":"","loop_label":""})
-                    added=1
-                    if yes_flow.startswith("↩️") and yes_loop_to!="":
-                        st.session_state.steps[d_idx]["loop_to"]=yes_loop_to
-                        st.session_state.steps[d_idx]["loop_label"]=yes_loop_lbl
-                    elif yes_flow.startswith("➕") and yes_new_text.strip():
-                        yes_col="right" if "right" in yes_flow else "left"
-                        st.session_state.steps.append({
-                            "shape":yes_new_shape or "rect","text":yes_new_text.strip(),
-                            "column":yes_col,"input_label":"","output_label":"","responsible":"","doc_format":"","measurement":"",
-                            "yes_label":"YES","no_label":"NO","connect_from":str(d_idx),
-                            "connect_side":"right side →" if yes_col=="right" else "bottom (default)",
-                            "arrow_label":yes_lbl or "YES","loop_to":"","loop_label":""}); added+=1
-                    if no_flow.startswith("↩️") and no_loop_to!="":
-                        if not st.session_state.steps[d_idx]["loop_to"]:
-                            st.session_state.steps[d_idx]["loop_to"]=no_loop_to
-                            st.session_state.steps[d_idx]["loop_label"]=no_loop_lbl
-                    elif no_flow.startswith("➕") and no_new_text.strip():
-                        no_col="right" if "right" in no_flow else "left"
-                        st.session_state.steps.append({
-                            "shape":no_new_shape or "rect","text":no_new_text.strip(),
-                            "column":no_col,"input_label":"","output_label":"","responsible":"","doc_format":"","measurement":"",
-                            "yes_label":"YES","no_label":"NO","connect_from":str(d_idx),
-                            "connect_side":"right side →" if no_col=="right" else "left side ←",
-                            "arrow_label":no_lbl or "NO","loop_to":"","loop_label":""}); added+=1
-                    st.success(f"✅ Added {added} step(s)"); st.rerun()
-                else:
-                    cf_v=str(int(connect_from.strip())-1) if connect_from.strip().isdigit() else ""
-                    lt_v=str(int(loop_to.strip())-1)      if loop_to.strip().isdigit()      else ""
-                    st.session_state.steps.append({
-                        "shape":SHAPE_TYPES[shape_label],"text":step_text.strip(),"column":col_choice,
-                        "input_label":input_label,"output_label":output_label,"responsible":responsible,
-                        "doc_format":doc_format,"measurement":measurement,"yes_label":"YES","no_label":"NO",
-                        "connect_from":cf_v,"connect_side":connect_side,"arrow_label":arrow_label,
-                        "loop_to":lt_v,"loop_label":loop_label})
+
+                elif not is_diamond:
+                    # Plain non-diamond step
+                    cf_v = connect_from.strip() if connect_from.strip().isdigit() else ""
+                    lt_v = loop_to.strip()       if loop_to.strip().isdigit()      else ""
+                    st.session_state.steps.append(sanitize_step({
+                        "shape": SHAPE_TYPES[shape_label], "text": step_text.strip(),
+                        "column": col_choice,
+                        "input_label": input_label, "output_label": output_label,
+                        "responsible": responsible, "doc_format": doc_format,
+                        "measurement": measurement, "yes_label": "YES", "no_label": "NO",
+                        "connect_from": cf_v, "connect_side": connect_side,
+                        "arrow_label": arrow_label, "loop_to": lt_v, "loop_label": loop_label,
+                    }))
                     st.success(f"✅ Step {len(st.session_state.steps)} added"); st.rerun()
+
+                else:
+                    # ── BUILD DIAMOND + ALL BRANCHES ────────────────────────
+                    d_idx   = len(st.session_state.steps)
+                    d_cf_v  = d_cf.strip() if d_cf.strip().isdigit() else ""
+                    added   = 0
+
+                    diamond = sanitize_step({
+                        "shape": "diamond", "text": step_text.strip(),
+                        "column": col_choice,
+                        "input_label": d_inp, "output_label": d_out,
+                        "responsible": d_resp, "doc_format": d_doc, "measurement": d_meas,
+                        "yes_label": yes_lbl or "YES", "no_label": no_lbl or "NO",
+                        "connect_from": d_cf_v, "connect_side": d_side,
+                        "arrow_label": "", "loop_to": "", "loop_label": "",
+                    })
+
+                    # ---- YES branch processing ----
+                    if yes_flow == BRANCH_ACTIONS[1]:          # loop back from diamond
+                        diamond["loop_to"]    = yes_loop_to
+                        diamond["loop_label"] = yes_loop_lbl
+
+                    st.session_state.steps.append(diamond)
+                    added += 1
+
+                    if yes_flow == BRANCH_ACTIONS[0] and yes_new_text.strip():
+                        yes_step_idx = len(st.session_state.steps)
+                        yes_step = sanitize_step({
+                            "shape": yes_new_shape or "rect",
+                            "text":  yes_new_text.strip(),
+                            "column": yes_new_col or "right",
+                            "connect_from": str(d_idx),
+                            "connect_side": yes_new_side,
+                            "arrow_label":  yes_lbl or "YES",
+                            "loop_to": "", "loop_label": "",
+                            "yes_label": "YES", "no_label": "NO",
+                            "input_label":"","output_label":"",
+                            "responsible":"","doc_format":"","measurement":"",
+                        })
+
+                        # YES sub-action
+                        if yes_sub_action == BRANCH_ACTIONS[1] and yes_sub_loop_to:
+                            yes_step["loop_to"]    = yes_sub_loop_to
+                            yes_step["loop_label"] = yes_sub_loop_lbl
+
+                        st.session_state.steps.append(yes_step)
+                        added += 1
+
+                        # Add YES sub-shape if needed
+                        if yes_sub_action == BRANCH_ACTIONS[0] and yes_sub_text.strip():
+                            st.session_state.steps.append(sanitize_step({
+                                "shape": yes_sub_shape or "rect",
+                                "text":  yes_sub_text.strip(),
+                                "column": yes_sub_col or "right",
+                                "connect_from": str(yes_step_idx),
+                                "connect_side": "bottom (default)",
+                                "arrow_label": "",
+                                "loop_to": "", "loop_label": "",
+                                "yes_label":"YES","no_label":"NO",
+                                "input_label":"","output_label":"",
+                                "responsible":"","doc_format":"","measurement":"",
+                            }))
+                            added += 1
+
+                    elif yes_flow == BRANCH_ACTIONS[2] and yes_join_step:
+                        # YES joins an existing step — annotate via connect_from on that step
+                        # We just note it; user can fine-tune in edit
+                        pass
+
+                    # ---- NO branch processing ----
+                    if no_flow == BRANCH_ACTIONS[1]:           # loop back from diamond
+                        if not st.session_state.steps[d_idx]["loop_to"]:
+                            st.session_state.steps[d_idx]["loop_to"]    = no_loop_to
+                            st.session_state.steps[d_idx]["loop_label"] = no_loop_lbl
+
+                    elif no_flow == BRANCH_ACTIONS[0] and no_new_text.strip():
+                        no_step_idx = len(st.session_state.steps)
+                        no_step = sanitize_step({
+                            "shape": no_new_shape or "rect",
+                            "text":  no_new_text.strip(),
+                            "column": no_new_col or "left",
+                            "connect_from": str(d_idx),
+                            "connect_side": no_new_side,
+                            "arrow_label":  no_lbl or "NO",
+                            "loop_to": "", "loop_label": "",
+                            "yes_label": "YES", "no_label": "NO",
+                            "input_label":"","output_label":"",
+                            "responsible":"","doc_format":"","measurement":"",
+                        })
+
+                        # NO sub-action
+                        if no_sub_action == BRANCH_ACTIONS[1] and no_sub_loop_to:
+                            no_step["loop_to"]    = no_sub_loop_to
+                            no_step["loop_label"] = no_sub_loop_lbl
+
+                        st.session_state.steps.append(no_step)
+                        added += 1
+
+                        # Add NO sub-shape if needed
+                        if no_sub_action == BRANCH_ACTIONS[0] and no_sub_text.strip():
+                            st.session_state.steps.append(sanitize_step({
+                                "shape": no_sub_shape or "rect",
+                                "text":  no_sub_text.strip(),
+                                "column": no_sub_col or "left",
+                                "connect_from": str(no_step_idx),
+                                "connect_side": "bottom (default)",
+                                "arrow_label": "",
+                                "loop_to": "", "loop_label": "",
+                                "yes_label":"YES","no_label":"NO",
+                                "input_label":"","output_label":"",
+                                "responsible":"","doc_format":"","measurement":"",
+                            }))
+                            added += 1
+
+                    st.success(f"✅ Added {added} step(s) — total: {len(st.session_state.steps)}")
+                    st.rerun()
 
         # ── Steps list ─────────────────────────────────────────────────────────
         st.divider()
@@ -1061,10 +1262,10 @@ with tab2:
                 lbl=rev_map.get(step["shape"],step["shape"])
                 ct="🔵 left" if step.get("column","left")=="left" else "🟢 right"
                 cf=(step.get("connect_from") or "")
-                cf_d=str(int(cf)+1) if str(cf).isdigit() else "auto"
+                cf_d=f"step {cf}" if str(cf).isdigit() else "auto"
                 lt=(step.get("loop_to") or "")
-                lt_d=str(int(lt)+1) if str(lt).isdigit() else "—"
-                with st.expander(f"**Step {i+1}** {ct} › [{lbl}]  {step.get('text','')}",expanded=False):
+                lt_d=f"step {lt}" if str(lt).isdigit() else "—"
+                with st.expander(f"**Step {i} (idx {i})** {ct} › [{lbl}]  {step.get('text','')}",expanded=False):
                     nt=st.text_input("Edit text",value=(step.get("text") or ""),key=f"e_{i}")
                     if nt!=step.get("text",""): st.session_state.steps[i]["text"]=nt; st.rerun()
                     e1,e2,e3=st.columns(3)
@@ -1074,6 +1275,22 @@ with tab2:
                     if nr!=step.get("responsible",""): st.session_state.steps[i]["responsible"]=nr; st.rerun()
                     if nd!=step.get("doc_format",""):  st.session_state.steps[i]["doc_format"]=nd;  st.rerun()
                     if nm!=step.get("measurement",""): st.session_state.steps[i]["measurement"]=nm; st.rerun()
+
+                    # Extra connection fields editable inline
+                    ea1,ea2,ea3=st.columns(3)
+                    n_cf   = ea1.text_input("Connect from step #", value=(step.get("connect_from") or ""), key=f"cf_{i}")
+                    n_side = ea2.selectbox("Arrow side", CONNECT_SIDE_OPTIONS,
+                                           index=CONNECT_SIDE_OPTIONS.index(step.get("connect_side","bottom (default)"))
+                                           if step.get("connect_side") in CONNECT_SIDE_OPTIONS else 0, key=f"cs_{i}")
+                    n_al   = ea3.text_input("Arrow label", value=(step.get("arrow_label") or ""), key=f"al_{i}")
+                    eb1,eb2=st.columns(2)
+                    n_lt   = eb1.text_input("Loop-to step #", value=(step.get("loop_to") or ""), key=f"lt_{i}")
+                    n_ll   = eb2.text_input("Loop label",     value=(step.get("loop_label") or ""), key=f"ll_{i}")
+                    for fk,fv in [("connect_from",n_cf),("connect_side",n_side),
+                                   ("arrow_label",n_al),("loop_to",n_lt),("loop_label",n_ll)]:
+                        if step.get(fk,"") != fv:
+                            st.session_state.steps[i][fk]=fv; st.rerun()
+
                     b1,b2,b3,_=st.columns([1,1,1,4])
                     if b1.button("⬆️",key=f"u_{i}"):
                         if i>0: st.session_state.steps[i],st.session_state.steps[i-1]=st.session_state.steps[i-1],st.session_state.steps[i]
@@ -1083,7 +1300,7 @@ with tab2:
                         st.rerun()
                     if b3.button("🗑️",key=f"del_{i}"):
                         st.session_state.steps.pop(i); st.rerun()
-                    st.caption(f"Connect from: step {cf_d}  |  Side: {step.get('connect_side','bottom')}  |  Arrow: {step.get('arrow_label','—')}  |  Loop to: {lt_d}")
+                    st.caption(f"Connect from: {cf_d}  |  Side: {step.get('connect_side','bottom')}  |  Arrow: {step.get('arrow_label','—')}  |  Loop to: {lt_d}")
         else:
             st.info("No steps yet. Use the form above to add process flow steps." if "Manual" in mode
                     else "Describe your process above and click ✨ Generate Flowchart with Gemini.")
@@ -1137,10 +1354,10 @@ with tab4:
         st.divider()
         st.subheader("Step Summary")
         rev_map={v:k for k,v in SHAPE_TYPES.items()}
-        rows=[{"Step":i+1,"Col":s.get("column","left"),"Shape":rev_map.get(s["shape"],s["shape"]),
+        rows=[{"Step (idx)":f"{i} (idx {i})","Col":s.get("column","left"),"Shape":rev_map.get(s["shape"],s["shape"]),
                "Text":(s.get("text") or ""),
-               "Connect from":str(int(s.get("connect_from",""))+1) if str(s.get("connect_from","")).isdigit() else "auto",
+               "Connect from":s.get("connect_from","") if str(s.get("connect_from","")).isdigit() else "auto",
                "Arrow label":(s.get("arrow_label") or ""),
-               "Loop to":str(int(s.get("loop_to",""))+1) if str(s.get("loop_to","")).isdigit() else "—"}
+               "Loop to":s.get("loop_to","") if str(s.get("loop_to","")).isdigit() else "—"}
               for i,s in enumerate(st.session_state.steps)]
         st.dataframe(rows,use_container_width=True,hide_index=True)
