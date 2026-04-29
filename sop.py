@@ -878,12 +878,11 @@ with tab2:
                         except Exception as e: st.error(f"⚠️ Error: {e}")
 
         # ══════════════════════════════════════════════════════════
-        # ✏️ MANUAL MODE — FULLY ENHANCED DECISION BUILDER
+        # ✏️ MANUAL MODE
         # ══════════════════════════════════════════════════════════
         else:
             SHAPE_NO_DIAM = [k for k in SHAPE_TYPES if k != "Decision (Diamond)"]
 
-            # Step index reference banner
             if st.session_state.steps:
                 refs = "  |  ".join([
                     f"**{i}** = {(s.get('text') or SHAPE_TYPES.get(s.get('shape',''),''))[:20]}"
@@ -938,11 +937,10 @@ with tab2:
                         loop_to    = st.text_input("Loop-back to step # (0-based)", key="f_lt")
                         loop_label = st.text_input("Loop label", key="f_ll")
 
-                # ── DIAMOND — FULL BRANCH BUILDER ────────────────────────────
+                # ── DIAMOND ────────────────────────────────────────────────
                 else:
                     st.markdown("### 🔀 Decision Branch Configuration")
 
-                    # Arrow INTO this diamond
                     st.markdown("**Arrow into this diamond**")
                     dc1, dc2 = st.columns(2)
                     with dc1:
@@ -950,7 +948,6 @@ with tab2:
                     with dc2:
                         d_side = st.selectbox("Arrow exits source from", CONNECT_SIDE_OPTIONS, key="f_ds")
 
-                    # YES/NO label customisation
                     yl_c, nl_c = st.columns(2)
                     with yl_c: yes_lbl = st.text_input("YES label text", value="YES", key="f_yes_lbl")
                     with nl_c: no_lbl  = st.text_input("NO label text",  value="NO",  key="f_no_lbl")
@@ -962,20 +959,17 @@ with tab2:
                     # ── YES BRANCH ──────────────────────────────────────────
                     st.markdown('<div class="yes-section">', unsafe_allow_html=True)
                     st.markdown("#### ✅ YES Branch")
-
                     yes_flow = st.selectbox("YES branch action", BRANCH_ACTIONS, key="f_yf")
 
-                    # initialise all yes vars
                     yes_new_shape=yes_new_text=yes_new_col=""
                     yes_new_side="right side →"
                     yes_loop_to=yes_loop_lbl=""
-                    yes_join_step=yes_join_side=""
-                    # sub-branch vars (after yes new shape)
+                    yes_join_step=""
                     yes_sub_action=""
                     yes_sub_shape=yes_sub_text=yes_sub_col=""
                     yes_sub_loop_to=yes_sub_loop_lbl=""
 
-                    if yes_flow == BRANCH_ACTIONS[0]:   # ➕ Add new shape
+                    if yes_flow == BRANCH_ACTIONS[0]:
                         y1, y2, y3 = st.columns(3)
                         with y1:
                             ysl          = st.selectbox("Shape type", SHAPE_NO_DIAM, key="f_ysl")
@@ -986,12 +980,10 @@ with tab2:
                             yes_new_side = st.selectbox("Arrow exits diamond from", CONNECT_SIDE_OPTIONS, key="f_ysd")
                         yes_new_text = st.text_input("Text in YES shape", key="f_yt")
 
-                        # Sub-action: what happens AFTER this YES shape?
                         st.markdown('<div class="branch-sub">', unsafe_allow_html=True)
                         st.markdown("**After this YES shape → next action:**")
                         yes_sub_action = st.selectbox("YES sub-action", BRANCH_ACTIONS, key="f_ysa")
-
-                        if yes_sub_action == BRANCH_ACTIONS[0]:   # add another shape
+                        if yes_sub_action == BRANCH_ACTIONS[0]:
                             ys1, ys2 = st.columns(2)
                             with ys1:
                                 yssl           = st.selectbox("Sub-shape type", SHAPE_NO_DIAM, key="f_yssl")
@@ -999,15 +991,13 @@ with tab2:
                             with ys2:
                                 yes_sub_col    = st.selectbox("Sub-shape column", COLUMN_OPTIONS, key="f_yscol")
                             yes_sub_text = st.text_input("Sub-shape text", key="f_yst")
-
-                        elif yes_sub_action == BRANCH_ACTIONS[1]: # loop back
+                        elif yes_sub_action == BRANCH_ACTIONS[1]:
                             if no_steps: st.info("No steps yet to loop back to.")
                             else:
                                 sel             = st.selectbox("Loop back to", opts, key="f_ysls")
                                 yes_sub_loop_to = str(idx_from_opt(sel)) if idx_from_opt(sel) is not None else ""
                             yes_sub_loop_lbl = st.text_input("Loop label", value="YES", key="f_ysll")
-
-                        elif yes_sub_action == BRANCH_ACTIONS[2]: # join existing
+                        elif yes_sub_action == BRANCH_ACTIONS[2]:
                             if no_steps: st.info("No steps yet.")
                             else:
                                 selj            = st.selectbox("Join step", opts, key="f_ysjs")
@@ -1015,40 +1005,36 @@ with tab2:
                             yes_sub_loop_lbl = st.selectbox("Arrow side", CONNECT_SIDE_OPTIONS, key="f_ysjsd")
                         st.markdown('</div>', unsafe_allow_html=True)
 
-                    elif yes_flow == BRANCH_ACTIONS[1]: # ↩️ Loop back
+                    elif yes_flow == BRANCH_ACTIONS[1]:
                         if no_steps: st.info("No steps yet to loop back to.")
                         else:
                             sel        = st.selectbox("Loop back to step", opts, key="f_yls")
                             yes_loop_to= str(idx_from_opt(sel)) if idx_from_opt(sel) is not None else ""
                         yes_loop_lbl = st.text_input("Loop label", value="YES", key="f_yll")
 
-                    elif yes_flow == BRANCH_ACTIONS[2]: # 🔗 Join existing
+                    elif yes_flow == BRANCH_ACTIONS[2]:
                         if no_steps: st.info("No steps yet.")
                         else:
                             selj           = st.selectbox("Connect YES to step", opts, key="f_yjs")
                             yes_join_step  = str(idx_from_opt(selj)) if idx_from_opt(selj) is not None else ""
-                        yes_join_side  = st.selectbox("Arrow exits diamond from", CONNECT_SIDE_OPTIONS, key="f_yjsi")
 
                     st.markdown('</div>', unsafe_allow_html=True)
-
                     st.markdown("---")
+
                     # ── NO BRANCH ──────────────────────────────────────────
                     st.markdown('<div class="no-section">', unsafe_allow_html=True)
                     st.markdown("#### ❌ NO Branch")
-
                     no_flow = st.selectbox("NO branch action", BRANCH_ACTIONS, key="f_nf")
 
-                    # initialise all no vars
                     no_new_shape=no_new_text=no_new_col=""
                     no_new_side="left side ←"
                     no_loop_to=no_loop_lbl=""
-                    no_join_step=no_join_side=""
-                    # sub-branch vars (after no new shape)
+                    no_join_step=""
                     no_sub_action=""
                     no_sub_shape=no_sub_text=no_sub_col=""
                     no_sub_loop_to=no_sub_loop_lbl=""
 
-                    if no_flow == BRANCH_ACTIONS[0]:    # ➕ Add new shape
+                    if no_flow == BRANCH_ACTIONS[0]:
                         n1, n2, n3 = st.columns(3)
                         with n1:
                             nsl          = st.selectbox("Shape type", SHAPE_NO_DIAM, key="f_nsl")
@@ -1059,12 +1045,10 @@ with tab2:
                             no_new_side  = st.selectbox("Arrow exits diamond from", CONNECT_SIDE_OPTIONS, key="f_nsd")
                         no_new_text = st.text_input("Text in NO shape", key="f_nt")
 
-                        # Sub-action: what happens AFTER this NO shape?
                         st.markdown('<div class="branch-sub">', unsafe_allow_html=True)
                         st.markdown("**After this NO shape → next action:**")
                         no_sub_action = st.selectbox("NO sub-action", BRANCH_ACTIONS, key="f_nsa")
-
-                        if no_sub_action == BRANCH_ACTIONS[0]:    # add another shape
+                        if no_sub_action == BRANCH_ACTIONS[0]:
                             ns1, ns2 = st.columns(2)
                             with ns1:
                                 nssl          = st.selectbox("Sub-shape type", SHAPE_NO_DIAM, key="f_nssl")
@@ -1072,15 +1056,13 @@ with tab2:
                             with ns2:
                                 no_sub_col    = st.selectbox("Sub-shape column", COLUMN_OPTIONS, key="f_nscol")
                             no_sub_text = st.text_input("Sub-shape text", key="f_nst")
-
-                        elif no_sub_action == BRANCH_ACTIONS[1]:  # loop back
+                        elif no_sub_action == BRANCH_ACTIONS[1]:
                             if no_steps: st.info("No steps yet to loop back to.")
                             else:
                                 sel            = st.selectbox("Loop back to", opts, key="f_nsls")
                                 no_sub_loop_to = str(idx_from_opt(sel)) if idx_from_opt(sel) is not None else ""
                             no_sub_loop_lbl = st.text_input("Loop label", value="NO", key="f_nsll")
-
-                        elif no_sub_action == BRANCH_ACTIONS[2]:  # join existing
+                        elif no_sub_action == BRANCH_ACTIONS[2]:
                             if no_steps: st.info("No steps yet.")
                             else:
                                 selj           = st.selectbox("Join step", opts, key="f_nsjs")
@@ -1088,24 +1070,22 @@ with tab2:
                             no_sub_loop_lbl = st.selectbox("Arrow side", CONNECT_SIDE_OPTIONS, key="f_nsjsd")
                         st.markdown('</div>', unsafe_allow_html=True)
 
-                    elif no_flow == BRANCH_ACTIONS[1]:  # ↩️ Loop back
+                    elif no_flow == BRANCH_ACTIONS[1]:
                         if no_steps: st.info("No steps yet to loop back to.")
                         else:
                             sel       = st.selectbox("Loop back to step", opts, key="f_nls")
                             no_loop_to= str(idx_from_opt(sel)) if idx_from_opt(sel) is not None else ""
                         no_loop_lbl = st.text_input("Loop label", value="NO", key="f_nll")
 
-                    elif no_flow == BRANCH_ACTIONS[2]:  # 🔗 Join existing
+                    elif no_flow == BRANCH_ACTIONS[2]:
                         if no_steps: st.info("No steps yet.")
                         else:
                             selj          = st.selectbox("Connect NO to step", opts, key="f_njs")
                             no_join_step  = str(idx_from_opt(selj)) if idx_from_opt(selj) is not None else ""
-                        no_join_side  = st.selectbox("Arrow exits diamond from", CONNECT_SIDE_OPTIONS, key="f_njsi")
 
                     st.markdown('</div>', unsafe_allow_html=True)
-
                     st.markdown("---")
-                    # Side-column data for diamond
+
                     st.markdown("**Side-column data (optional)**")
                     d1,d2,d3=st.columns(3)
                     d_inp  = d1.text_input("Input Label",  key="f_di")
@@ -1116,13 +1096,12 @@ with tab2:
 
                 submitted = st.form_submit_button("➕ Add Step(s)", use_container_width=True, type="primary")
 
-            # ── PROCESS SUBMISSION ───────────────────────────────────────────
+            # ── PROCESS SUBMISSION ────────────────────────────────────────────
             if submitted:
                 if not step_text.strip():
                     st.warning("⚠️ Please enter text for the shape.")
 
                 elif not is_diamond:
-                    # Plain non-diamond step
                     cf_v = connect_from.strip() if connect_from.strip().isdigit() else ""
                     lt_v = loop_to.strip()       if loop_to.strip().isdigit()      else ""
                     st.session_state.steps.append(sanitize_step({
@@ -1137,11 +1116,26 @@ with tab2:
                     st.success(f"✅ Step {len(st.session_state.steps)} added"); st.rerun()
 
                 else:
-                    # ── BUILD DIAMOND + ALL BRANCHES ────────────────────────
-                    d_idx   = len(st.session_state.steps)
-                    d_cf_v  = d_cf.strip() if d_cf.strip().isdigit() else ""
-                    added   = 0
+                    # ═══════════════════════════════════════════════════════════
+                    # FIXED DIAMOND SUBMISSION
+                    # Bugs fixed:
+                    # 1. d_idx computed with len()-1 AFTER append — always accurate
+                    # 2. YES/NO loop slots tracked separately: if diamond.loop_to
+                    #    is already taken by YES, NO branch emits its own connector
+                    # 3. Sub-step indices computed after each append — no drift
+                    # 4. join/loop on sub-shapes properly wired
+                    # ═══════════════════════════════════════════════════════════
+                    added = 0
+                    d_cf_v = d_cf.strip() if d_cf.strip().isdigit() else ""
 
+                    # YES loop-back gets diamond's loop_to slot (priority)
+                    diamond_loop_to  = ""
+                    diamond_loop_lbl = ""
+                    if yes_flow == BRANCH_ACTIONS[1] and yes_loop_to:
+                        diamond_loop_to  = yes_loop_to
+                        diamond_loop_lbl = yes_loop_lbl
+
+                    # 1. Append diamond
                     diamond = sanitize_step({
                         "shape": "diamond", "text": step_text.strip(),
                         "column": col_choice,
@@ -1149,17 +1143,13 @@ with tab2:
                         "responsible": d_resp, "doc_format": d_doc, "measurement": d_meas,
                         "yes_label": yes_lbl or "YES", "no_label": no_lbl or "NO",
                         "connect_from": d_cf_v, "connect_side": d_side,
-                        "arrow_label": "", "loop_to": "", "loop_label": "",
+                        "arrow_label": "", "loop_to": diamond_loop_to, "loop_label": diamond_loop_lbl,
                     })
-
-                    # ---- YES branch processing ----
-                    if yes_flow == BRANCH_ACTIONS[1]:          # loop back from diamond
-                        diamond["loop_to"]    = yes_loop_to
-                        diamond["loop_label"] = yes_loop_lbl
-
                     st.session_state.steps.append(diamond)
+                    d_idx = len(st.session_state.steps) - 1   # ← always accurate
                     added += 1
 
+                    # ── YES BRANCH ────────────────────────────────────────────
                     if yes_flow == BRANCH_ACTIONS[0] and yes_new_text.strip():
                         yes_step_idx = len(st.session_state.steps)
                         yes_step = sanitize_step({
@@ -1167,24 +1157,24 @@ with tab2:
                             "text":  yes_new_text.strip(),
                             "column": yes_new_col or "right",
                             "connect_from": str(d_idx),
-                            "connect_side": yes_new_side,
+                            "connect_side": yes_new_side or "right side →",
                             "arrow_label":  yes_lbl or "YES",
                             "loop_to": "", "loop_label": "",
                             "yes_label": "YES", "no_label": "NO",
-                            "input_label":"","output_label":"",
-                            "responsible":"","doc_format":"","measurement":"",
+                            "input_label": "", "output_label": "",
+                            "responsible": "", "doc_format": "", "measurement": "",
                         })
-
-                        # YES sub-action
-                        if yes_sub_action == BRANCH_ACTIONS[1] and yes_sub_loop_to:
-                            yes_step["loop_to"]    = yes_sub_loop_to
-                            yes_step["loop_label"] = yes_sub_loop_lbl
-
                         st.session_state.steps.append(yes_step)
                         added += 1
 
-                        # Add YES sub-shape if needed
-                        if yes_sub_action == BRANCH_ACTIONS[0] and yes_sub_text.strip():
+                        # YES sub-action
+                        if yes_sub_action == BRANCH_ACTIONS[1] and yes_sub_loop_to:
+                            st.session_state.steps[yes_step_idx]["loop_to"]    = yes_sub_loop_to
+                            st.session_state.steps[yes_step_idx]["loop_label"] = yes_sub_loop_lbl
+                        elif yes_sub_action == BRANCH_ACTIONS[2] and yes_sub_loop_to:
+                            st.session_state.steps[yes_step_idx]["loop_to"]    = yes_sub_loop_to
+                            st.session_state.steps[yes_step_idx]["loop_label"] = yes_sub_loop_lbl or "YES"
+                        elif yes_sub_action == BRANCH_ACTIONS[0] and yes_sub_text.strip():
                             st.session_state.steps.append(sanitize_step({
                                 "shape": yes_sub_shape or "rect",
                                 "text":  yes_sub_text.strip(),
@@ -1193,22 +1183,39 @@ with tab2:
                                 "connect_side": "bottom (default)",
                                 "arrow_label": "",
                                 "loop_to": "", "loop_label": "",
-                                "yes_label":"YES","no_label":"NO",
-                                "input_label":"","output_label":"",
-                                "responsible":"","doc_format":"","measurement":"",
+                                "yes_label": "YES", "no_label": "NO",
+                                "input_label": "", "output_label": "",
+                                "responsible": "", "doc_format": "", "measurement": "",
                             }))
                             added += 1
 
                     elif yes_flow == BRANCH_ACTIONS[2] and yes_join_step:
-                        # YES joins an existing step — annotate via connect_from on that step
-                        # We just note it; user can fine-tune in edit
-                        pass
-
-                    # ---- NO branch processing ----
-                    if no_flow == BRANCH_ACTIONS[1]:           # loop back from diamond
                         if not st.session_state.steps[d_idx]["loop_to"]:
+                            st.session_state.steps[d_idx]["loop_to"]    = yes_join_step
+                            st.session_state.steps[d_idx]["loop_label"] = yes_lbl or "YES"
+
+                    # ── NO BRANCH ─────────────────────────────────────────────
+                    if no_flow == BRANCH_ACTIONS[1] and no_loop_to:
+                        if not st.session_state.steps[d_idx]["loop_to"]:
+                            # Diamond slot free — use it
                             st.session_state.steps[d_idx]["loop_to"]    = no_loop_to
                             st.session_state.steps[d_idx]["loop_label"] = no_loop_lbl
+                        else:
+                            # Slot taken by YES — emit dedicated NO connector step
+                            st.session_state.steps.append(sanitize_step({
+                                "shape": "arrow_text",
+                                "text":  f"← {no_lbl or 'NO'}",
+                                "column": "left",
+                                "connect_from": str(d_idx),
+                                "connect_side": "left side ←",
+                                "arrow_label":  no_lbl or "NO",
+                                "loop_to":    no_loop_to,
+                                "loop_label": no_loop_lbl,
+                                "yes_label": "YES", "no_label": "NO",
+                                "input_label": "", "output_label": "",
+                                "responsible": "", "doc_format": "", "measurement": "",
+                            }))
+                            added += 1
 
                     elif no_flow == BRANCH_ACTIONS[0] and no_new_text.strip():
                         no_step_idx = len(st.session_state.steps)
@@ -1217,24 +1224,24 @@ with tab2:
                             "text":  no_new_text.strip(),
                             "column": no_new_col or "left",
                             "connect_from": str(d_idx),
-                            "connect_side": no_new_side,
+                            "connect_side": no_new_side or "left side ←",
                             "arrow_label":  no_lbl or "NO",
                             "loop_to": "", "loop_label": "",
                             "yes_label": "YES", "no_label": "NO",
-                            "input_label":"","output_label":"",
-                            "responsible":"","doc_format":"","measurement":"",
+                            "input_label": "", "output_label": "",
+                            "responsible": "", "doc_format": "", "measurement": "",
                         })
-
-                        # NO sub-action
-                        if no_sub_action == BRANCH_ACTIONS[1] and no_sub_loop_to:
-                            no_step["loop_to"]    = no_sub_loop_to
-                            no_step["loop_label"] = no_sub_loop_lbl
-
                         st.session_state.steps.append(no_step)
                         added += 1
 
-                        # Add NO sub-shape if needed
-                        if no_sub_action == BRANCH_ACTIONS[0] and no_sub_text.strip():
+                        # NO sub-action
+                        if no_sub_action == BRANCH_ACTIONS[1] and no_sub_loop_to:
+                            st.session_state.steps[no_step_idx]["loop_to"]    = no_sub_loop_to
+                            st.session_state.steps[no_step_idx]["loop_label"] = no_sub_loop_lbl
+                        elif no_sub_action == BRANCH_ACTIONS[2] and no_sub_loop_to:
+                            st.session_state.steps[no_step_idx]["loop_to"]    = no_sub_loop_to
+                            st.session_state.steps[no_step_idx]["loop_label"] = no_sub_loop_lbl or "NO"
+                        elif no_sub_action == BRANCH_ACTIONS[0] and no_sub_text.strip():
                             st.session_state.steps.append(sanitize_step({
                                 "shape": no_sub_shape or "rect",
                                 "text":  no_sub_text.strip(),
@@ -1243,9 +1250,30 @@ with tab2:
                                 "connect_side": "bottom (default)",
                                 "arrow_label": "",
                                 "loop_to": "", "loop_label": "",
-                                "yes_label":"YES","no_label":"NO",
-                                "input_label":"","output_label":"",
-                                "responsible":"","doc_format":"","measurement":"",
+                                "yes_label": "YES", "no_label": "NO",
+                                "input_label": "", "output_label": "",
+                                "responsible": "", "doc_format": "", "measurement": "",
+                            }))
+                            added += 1
+
+                    elif no_flow == BRANCH_ACTIONS[2] and no_join_step:
+                        if not st.session_state.steps[d_idx]["loop_to"]:
+                            st.session_state.steps[d_idx]["loop_to"]    = no_join_step
+                            st.session_state.steps[d_idx]["loop_label"] = no_lbl or "NO"
+                        else:
+                            # Slot taken — emit connector
+                            st.session_state.steps.append(sanitize_step({
+                                "shape": "arrow_text",
+                                "text":  f"← {no_lbl or 'NO'}",
+                                "column": "left",
+                                "connect_from": str(d_idx),
+                                "connect_side": "left side ←",
+                                "arrow_label":  no_lbl or "NO",
+                                "loop_to":    no_join_step,
+                                "loop_label": no_lbl or "NO",
+                                "yes_label": "YES", "no_label": "NO",
+                                "input_label": "", "output_label": "",
+                                "responsible": "", "doc_format": "", "measurement": "",
                             }))
                             added += 1
 
@@ -1276,7 +1304,6 @@ with tab2:
                     if nd!=step.get("doc_format",""):  st.session_state.steps[i]["doc_format"]=nd;  st.rerun()
                     if nm!=step.get("measurement",""): st.session_state.steps[i]["measurement"]=nm; st.rerun()
 
-                    # Extra connection fields editable inline
                     ea1,ea2,ea3=st.columns(3)
                     n_cf   = ea1.text_input("Connect from step #", value=(step.get("connect_from") or ""), key=f"cf_{i}")
                     n_side = ea2.selectbox("Arrow side", CONNECT_SIDE_OPTIONS,
