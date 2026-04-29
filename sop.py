@@ -879,12 +879,15 @@ def dw_commit():
     yes_parent_idx = d_idx
     for i, sub in enumerate(d.get("yes_steps", [])):
         arrow_lbl = d.get("yes_label", "YES") if i == 0 else ""
+        # Only the FIRST sub-step uses the stored connect_side (arrow from diamond).
+        # Sub-steps 2+ connect from the previous same-column step → always "bottom (default)".
+        conn_side = sub["connect_side"] if i == 0 else "bottom (default)"
         s = sanitize_step({
             "shape":        sub["shape"],
             "text":         sub["text"],
             "column":       sub["column"],
             "connect_from": str(yes_parent_idx),
-            "connect_side": sub["connect_side"],
+            "connect_side": conn_side,
             "arrow_label":  arrow_lbl,
             "yes_label":    "YES",
             "no_label":     "NO",
@@ -918,12 +921,15 @@ def dw_commit():
     no_parent_idx = d_idx
     for i, sub in enumerate(d.get("no_steps", [])):
         arrow_lbl = d.get("no_label", "NO") if i == 0 else ""
+        # Only the FIRST sub-step uses the stored connect_side (arrow from diamond).
+        # Sub-steps 2+ connect from the previous same-column step → always "bottom (default)".
+        conn_side = sub["connect_side"] if i == 0 else "bottom (default)"
         s = sanitize_step({
             "shape":        sub["shape"],
             "text":         sub["text"],
             "column":       sub["column"],
             "connect_from": str(no_parent_idx),
-            "connect_side": sub["connect_side"],
+            "connect_side": conn_side,
             "arrow_label":  arrow_lbl,
             "yes_label":    "YES",
             "no_label":     "NO",
@@ -1096,25 +1102,31 @@ def render_diamond_wizard(existing_step_opts):
     # ═══════════════════════════════════════════════════════════════════════════
     elif stage == "yes_placement":
         sub_num = len(d.get("yes_steps", [])) + 1
-        st.markdown(f'### ✅ YES Branch — Step {sub_num} Placement')
         pending = d.get("_yes_pending", {})
         shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
-        st.info(f'Shape: **{shape_name}** — Where should this YES step go?')
-
-        with st.form("dw_yes_placement"):
-            placement = st.radio(
-                "Placement",
-                PLACEMENT_OPTIONS,
-                index=2,   # default: Right
-                horizontal=True,
-            )
-            if st.form_submit_button("Next →", use_container_width=True, type="primary"):
-                col, side = placement_to_col_side(placement)
-                pending["column"]       = col
-                pending["connect_side"] = side
-                d["_yes_pending"] = pending
-                st.session_state.dw_stage = "yes_text"
-                st.rerun()
+        st.markdown(f'### ✅ YES Branch — Step {sub_num} Placement')
+        st.info(f'Shape: **{shape_name}**')
+        st.markdown("**Where should this YES step appear? Click your choice:**")
+        st.markdown("""
+<div style="background:#F0FFF4;border:1px solid #9AE6B4;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px">
+  <b>Main Flow</b> → stays in left column, arrow goes straight ↓<br>
+  <b>Left</b> → stays in left column, arrow goes left ←<br>
+  <b>Right</b> → moves to right column, arrow goes right →
+</div>
+""", unsafe_allow_html=True)
+        p1, p2, p3 = st.columns(3)
+        def _set_yes_placement(placement):
+            col, side = placement_to_col_side(placement)
+            pending["column"]       = col
+            pending["connect_side"] = side
+            d["_yes_pending"] = pending
+            st.session_state.dw_stage = "yes_text"
+        if p1.button("⬇️ Main Flow\n(left col, down)", use_container_width=True, key="yp_main"):
+            _set_yes_placement("Main Flow"); st.rerun()
+        if p2.button("← Left\n(left col, elbow left)", use_container_width=True, key="yp_left"):
+            _set_yes_placement("Left"); st.rerun()
+        if p3.button("→ Right\n(right col, elbow right)", use_container_width=True, key="yp_right", type="primary"):
+            _set_yes_placement("Right"); st.rerun()
 
     # ═══════════════════════════════════════════════════════════════════════════
     # STAGE: yes_text
@@ -1224,22 +1236,28 @@ def render_diamond_wizard(existing_step_opts):
         pending = d.get("_no_pending", {})
         shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
         st.markdown(f'### ❌ NO Branch — Step {sub_num} Placement')
-        st.info(f'Shape: **{shape_name}** — Where should this NO step go?')
-
-        with st.form("dw_no_placement"):
-            placement = st.radio(
-                "Placement",
-                PLACEMENT_OPTIONS,
-                index=1,   # default: Left
-                horizontal=True,
-            )
-            if st.form_submit_button("Next →", use_container_width=True, type="primary"):
-                col, side = placement_to_col_side(placement)
-                pending["column"]       = col
-                pending["connect_side"] = side
-                d["_no_pending"] = pending
-                st.session_state.dw_stage = "no_text"
-                st.rerun()
+        st.info(f'Shape: **{shape_name}**')
+        st.markdown("**Where should this NO step appear? Click your choice:**")
+        st.markdown("""
+<div style="background:#FFF5F5;border:1px solid #FEB2B2;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px">
+  <b>Main Flow</b> → stays in left column, arrow goes straight ↓<br>
+  <b>Left</b> → stays in left column, arrow goes left ←<br>
+  <b>Right</b> → moves to right column, arrow goes right →
+</div>
+""", unsafe_allow_html=True)
+        p1, p2, p3 = st.columns(3)
+        def _set_no_placement(placement):
+            col, side = placement_to_col_side(placement)
+            pending["column"]       = col
+            pending["connect_side"] = side
+            d["_no_pending"] = pending
+            st.session_state.dw_stage = "no_text"
+        if p1.button("⬇️ Main Flow\n(left col, down)", use_container_width=True, key="np_main"):
+            _set_no_placement("Main Flow"); st.rerun()
+        if p2.button("← Left\n(left col, elbow left)", use_container_width=True, key="np_left", type="primary"):
+            _set_no_placement("Left"); st.rerun()
+        if p3.button("→ Right\n(right col, elbow right)", use_container_width=True, key="np_right"):
+            _set_no_placement("Right"); st.rerun()
 
     # ═══════════════════════════════════════════════════════════════════════════
     # STAGE: no_text
