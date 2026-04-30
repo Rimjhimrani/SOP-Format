@@ -76,16 +76,18 @@ SHAPE_NO_DIAM = {k: v for k, v in SHAPE_TYPES.items() if v != "diamond"}
 COLUMN_OPTIONS = ["left", "right"]
 CONNECT_SIDE_OPTIONS = ["bottom (default)", "right side →", "left side ←"]
 
-PLACEMENT_OPTIONS = ["Main Flow", "Left", "Right"]
+# ── PLACEMENT: only Center (main flow) or Right branch ────────────────────────
+# "Left" is intentionally removed. Main flow stays in the CENTER column.
+# Right branch goes to the right column.
+PLACEMENT_OPTIONS = ["Center (Main Flow)", "Right Branch"]
 
 def placement_to_col_side(placement):
     """Convert user-friendly placement to (column, connect_side)."""
-    if placement == "Main Flow":
-        return "left", "bottom (default)"
-    elif placement == "Left":
-        return "left", "left side ←"
-    elif placement == "Right":
+    if placement == "Center (Main Flow)":
+        return "left", "bottom (default)"   # 'left' col = center in our 2-col layout
+    elif placement == "Right Branch":
         return "right", "right side →"
+    # Fallback
     return "left", "bottom (default)"
 
 # ─── AI System Prompt ─────────────────────────────────────────────────────────
@@ -97,7 +99,7 @@ Rules:
 - "diamond" → decisions (YES/NO)
 - "parallelogram" → inputs/outputs
 - "arrow_text" → annotations
-- "left" → main flow column, "right" → branch column
+- "left" → main/center flow column, "right" → branch column
 - "connect_from": 0-based index of parent, null for auto
 - "connect_side": "bottom (default)" | "right side →" | "left side ←"
 - "loop_to": 0-based index to loop back to, null if none
@@ -174,8 +176,10 @@ def generate_svg_preview(steps):
             <div style="text-align:center"><div style="font-size:32px;margin-bottom:8px">🔷</div>
             <div>Add steps to see your flowchart here</div></div></div>"""
 
-    SVG_W = 720
-    COL_L_CX = 190; COL_R_CX = 510
+    SVG_W    = 720
+    # ── Center column is truly centred; right column is to the right ──────────
+    COL_L_CX = 200   # "left" col = center main flow (was 190, now more centred)
+    COL_R_CX = 530   # right branch column
     BOX_W    = 170
     SH_H = {"rect":56,"oval":44,"parallelogram":56,"diamond":76,"arrow_text":28}
     ROW_GAP  = 36
@@ -339,11 +343,12 @@ def generate_svg_preview(steps):
         shape_svg += '</g>'
 
     has_right = any(s.get("column","left")=="right" for s in steps)
-    hdr_svg  = f'<rect x="20" y="6" width="200" height="20" rx="4" fill="#EBF4FF" stroke="#2B6CB0" stroke-width="0.8"/>'
-    hdr_svg += f'<text x="{COL_L_CX}" y="20" text-anchor="middle" font-size="12" font-weight="600" fill="#1A365D" font-family="\'Segoe UI\',sans-serif">Main Flow</text>'
+    # ── Updated header labels: "Center (Main Flow)" instead of "Main Flow" ───
+    hdr_svg  = f'<rect x="20" y="6" width="240" height="20" rx="4" fill="#EBF4FF" stroke="#2B6CB0" stroke-width="0.8"/>'
+    hdr_svg += f'<text x="{COL_L_CX}" y="20" text-anchor="middle" font-size="12" font-weight="600" fill="#1A365D" font-family="\'Segoe UI\',sans-serif">Center (Main Flow)</text>'
     if has_right:
         hdr_svg += f'<rect x="{COL_R_CX-100}" y="6" width="200" height="20" rx="4" fill="#F0FFF4" stroke="#276749" stroke-width="0.8"/>'
-        hdr_svg += f'<text x="{COL_R_CX}" y="20" text-anchor="middle" font-size="12" font-weight="600" fill="#1C4532" font-family="\'Segoe UI\',sans-serif">Branch</text>'
+        hdr_svg += f'<text x="{COL_R_CX}" y="20" text-anchor="middle" font-size="12" font-weight="600" fill="#1C4532" font-family="\'Segoe UI\',sans-serif">Right Branch</text>'
         mid=(COL_L_CX+BOX_W/2+COL_R_CX-BOX_W/2)/2
         hdr_svg += f'<line x1="{mid}" y1="30" x2="{mid}" y2="{SVG_H-10}" stroke="#CBD5E0" stroke-width="1" stroke-dasharray="4 4"/>'
 
@@ -810,47 +815,34 @@ def generate_pdf(steps, meta):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def dw_reset():
-    """Reset the diamond wizard to initial state."""
     st.session_state.dw_active = False
     st.session_state.dw_stage  = None
     st.session_state.dw_data   = {}
 
 def dw_start():
-    """Begin the diamond wizard."""
     st.session_state.dw_active = True
     st.session_state.dw_stage  = "diamond_text"
     st.session_state.dw_data   = {
-        # Diamond core
         "diamond_text": "",
         "diamond_col":  "left",
         "diamond_cf":   "",
         "yes_label":    "YES",
         "no_label":     "NO",
-        # YES branch — list of sub-steps: each {shape, text, column, connect_side}
         "yes_steps":    [],
-        # YES loop
         "yes_loop_to":  "",
         "yes_loop_lbl": "",
-        # NO branch — list of sub-steps
         "no_steps":     [],
-        # NO loop
         "no_loop_to":   "",
         "no_loop_lbl":  "",
-        # Which branch we're currently building
-        "_branch":      "yes",   # "yes" | "no"
-        "_sub_idx":     0,       # current sub-step being filled
-        "_sub_phase":   "shape", # shape | placement | text | more?
+        "_branch":      "yes",
+        "_sub_idx":     0,
+        "_sub_phase":   "shape",
     }
 
 def dw_commit():
-    """
-    Turn dw_data into actual steps and append them to st.session_state.steps.
-    Returns number of steps added.
-    """
     d = st.session_state.dw_data
     added = 0
 
-    # ── 1. Append the diamond itself ─────────────────────────────────────────
     diamond_step = sanitize_step({
         "shape":        "diamond",
         "text":         d["diamond_text"],
@@ -872,15 +864,12 @@ def dw_commit():
     d_idx = len(st.session_state.steps) - 1
     added += 1
 
-    # Track which loop slot on the diamond is free
     diamond_loop_used = False
 
-    # ── 2. YES branch sub-steps ───────────────────────────────────────────────
+    # YES branch
     yes_parent_idx = d_idx
     for i, sub in enumerate(d.get("yes_steps", [])):
         arrow_lbl = d.get("yes_label", "YES") if i == 0 else ""
-        # Only the FIRST sub-step uses the stored connect_side (arrow from diamond).
-        # Sub-steps 2+ connect from the previous same-column step → always "bottom (default)".
         conn_side = sub["connect_side"] if i == 0 else "bottom (default)"
         s = sanitize_step({
             "shape":        sub["shape"],
@@ -903,26 +892,21 @@ def dw_commit():
         yes_parent_idx = len(st.session_state.steps) - 1
         added += 1
 
-    # YES loop-back
     if d.get("yes_loop_to") != "":
-        # Try to use last YES sub-step's loop slot; else use diamond slot
         if d["yes_steps"]:
             last_yes_idx = yes_parent_idx
             st.session_state.steps[last_yes_idx]["loop_to"]    = str(d["yes_loop_to"])
             st.session_state.steps[last_yes_idx]["loop_label"] = d.get("yes_loop_lbl", "YES")
         else:
-            # No sub-steps — loop directly from diamond
             if not diamond_loop_used:
                 st.session_state.steps[d_idx]["loop_to"]    = str(d["yes_loop_to"])
                 st.session_state.steps[d_idx]["loop_label"] = d.get("yes_loop_lbl", "YES")
                 diamond_loop_used = True
 
-    # ── 3. NO branch sub-steps ────────────────────────────────────────────────
+    # NO branch
     no_parent_idx = d_idx
     for i, sub in enumerate(d.get("no_steps", [])):
         arrow_lbl = d.get("no_label", "NO") if i == 0 else ""
-        # Only the FIRST sub-step uses the stored connect_side (arrow from diamond).
-        # Sub-steps 2+ connect from the previous same-column step → always "bottom (default)".
         conn_side = sub["connect_side"] if i == 0 else "bottom (default)"
         s = sanitize_step({
             "shape":        sub["shape"],
@@ -945,20 +929,17 @@ def dw_commit():
         no_parent_idx = len(st.session_state.steps) - 1
         added += 1
 
-    # NO loop-back
     if d.get("no_loop_to") != "":
         if d["no_steps"]:
             last_no_idx = no_parent_idx
             st.session_state.steps[last_no_idx]["loop_to"]    = str(d["no_loop_to"])
             st.session_state.steps[last_no_idx]["loop_label"] = d.get("no_loop_lbl", "NO")
         else:
-            # No sub-steps — use diamond loop slot if free
             if not diamond_loop_used:
                 st.session_state.steps[d_idx]["loop_to"]    = str(d["no_loop_to"])
                 st.session_state.steps[d_idx]["loop_label"] = d.get("no_loop_lbl", "NO")
                 diamond_loop_used = True
             else:
-                # Slot taken — emit a tiny connector annotation
                 connector = sanitize_step({
                     "shape":        "arrow_text",
                     "text":         f"← {d.get('no_label','NO')}",
@@ -985,18 +966,17 @@ def dw_commit():
 def render_diamond_wizard(existing_step_opts):
     """
     Renders the guided Diamond wizard UI.
-    existing_step_opts: list of strings like "Step 0 : Start" for loop-back selectors.
-    Returns True if wizard should consume the whole input area (still active).
+    Only TWO placements offered: Center (Main Flow) and Right Branch.
+    "Left" has been removed entirely.
     """
     d    = st.session_state.dw_data
     stage = st.session_state.dw_stage
 
-    # ── Progress indicator ────────────────────────────────────────────────────
     STAGES = [
         "diamond_text", "diamond_cf",
-        "yes_label_setup", "yes_shape", "yes_placement", "yes_text", "yes_more",
+        "yes_shape", "yes_placement", "yes_text", "yes_more",
         "yes_loop",
-        "no_label_setup", "no_shape", "no_placement", "no_text", "no_more",
+        "no_shape", "no_placement", "no_text", "no_more",
         "no_loop",
         "review",
     ]
@@ -1022,20 +1002,15 @@ def render_diamond_wizard(existing_step_opts):
 
     st.markdown("---")
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: diamond_text — core diamond text + optional connect_from
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── diamond_text ──────────────────────────────────────────────────────────
     if stage == "diamond_text":
-        st.markdown("### Step 1 of 3 — Define the Decision")
-        st.markdown("**What question does this diamond ask?**")
+        st.markdown("### Step 1 — Define the Decision")
         with st.form("dw_diamond_text"):
             txt = st.text_input("Decision question text *",
                 placeholder="e.g. Is stock available?  /  Quality OK?")
             c1, c2 = st.columns(2)
-            with c1:
-                yes_lbl = st.text_input("YES label", value="YES")
-            with c2:
-                no_lbl  = st.text_input("NO label",  value="NO")
+            with c1: yes_lbl = st.text_input("YES label", value="YES")
+            with c2: no_lbl  = st.text_input("NO label",  value="NO")
             if st.form_submit_button("Next →", use_container_width=True, type="primary"):
                 if not txt.strip():
                     st.warning("⚠️ Please enter the decision question text.")
@@ -1046,11 +1021,9 @@ def render_diamond_wizard(existing_step_opts):
                     st.session_state.dw_stage = "diamond_cf"
                     st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: diamond_cf — optional connect-from
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── diamond_cf ────────────────────────────────────────────────────────────
     elif stage == "diamond_cf":
-        st.markdown("### Step 2 of 3 — Arrow into the Diamond")
+        st.markdown("### Step 2 — Arrow into the Diamond")
         st.info(f'Decision: **"{d["diamond_text"]}"**')
         with st.form("dw_diamond_cf"):
             if existing_step_opts:
@@ -1061,8 +1034,7 @@ def render_diamond_wizard(existing_step_opts):
                     cf_sel = None
             else:
                 st.caption("(No previous steps — arrow will be automatic.)")
-                cf_sel = None
-                use_cf = False
+                cf_sel = None; use_cf = False
 
             if st.form_submit_button("Next →", use_container_width=True, type="primary"):
                 if use_cf and cf_sel:
@@ -1073,13 +1045,10 @@ def render_diamond_wizard(existing_step_opts):
                 else:
                     d["diamond_cf"] = ""
                 st.session_state.dw_stage = "yes_shape"
-                d["_branch"] = "yes"
-                d["_sub_idx"] = 0
+                d["_branch"] = "yes"; d["_sub_idx"] = 0
                 st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: yes_shape — shape for current YES sub-step
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── yes_shape ─────────────────────────────────────────────────────────────
     elif stage == "yes_shape":
         sub_num = len(d.get("yes_steps", [])) + 1
         if sub_num == 1:
@@ -1091,54 +1060,47 @@ def render_diamond_wizard(existing_step_opts):
             st.info(f'After **"{prev}"** → next YES sub-step')
 
         with st.form("dw_yes_shape"):
-            shape_label = st.selectbox("What shape for this YES step?", list(SHAPE_NO_DIAM.keys()))
+            shape_label = st.selectbox("Shape for this YES step?", list(SHAPE_NO_DIAM.keys()))
             if st.form_submit_button("Next →", use_container_width=True, type="primary"):
                 d.setdefault("_yes_pending", {})["shape"] = SHAPE_NO_DIAM[shape_label]
                 st.session_state.dw_stage = "yes_placement"
                 st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: yes_placement
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── yes_placement — only Center or Right ──────────────────────────────────
     elif stage == "yes_placement":
         sub_num = len(d.get("yes_steps", [])) + 1
         pending = d.get("_yes_pending", {})
         shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
         st.markdown(f'### ✅ YES Branch — Step {sub_num} Placement')
         st.info(f'Shape: **{shape_name}**')
-        st.markdown("**Where should this YES step appear? Click your choice:**")
+
         st.markdown("""
-<div style="background:#F0FFF4;border:1px solid #9AE6B4;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px">
-  <b>Main Flow</b> → stays in left column, arrow goes straight ↓<br>
-  <b>Left</b> → stays in left column, arrow goes left ←<br>
-  <b>Right</b> → moves to right column, arrow goes right →
+<div style="background:#F0FFF4;border:1px solid #9AE6B4;border-radius:8px;
+     padding:10px 14px;margin-bottom:12px;font-size:13px">
+  <b>⬇️ Center (Main Flow)</b> — stays in the centre column, arrow continues straight down<br><br>
+  <b>→ Right Branch</b> — moves to the right column, arrow goes right from the diamond
 </div>
 """, unsafe_allow_html=True)
-        p1, p2, p3 = st.columns(3)
+
+        col1, col2 = st.columns(2)
         def _set_yes_placement(placement):
             col, side = placement_to_col_side(placement)
             pending["column"]       = col
             pending["connect_side"] = side
             d["_yes_pending"] = pending
             st.session_state.dw_stage = "yes_text"
-        if p1.button("⬇️ Main Flow\n(left col, down)", use_container_width=True, key="yp_main"):
-            _set_yes_placement("Main Flow"); st.rerun()
-        if p2.button("← Left\n(left col, elbow left)", use_container_width=True, key="yp_left"):
-            _set_yes_placement("Left"); st.rerun()
-        if p3.button("→ Right\n(right col, elbow right)", use_container_width=True, key="yp_right", type="primary"):
-            _set_yes_placement("Right"); st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: yes_text
-    # ═══════════════════════════════════════════════════════════════════════════
+        if col1.button("⬇️ Center (Main Flow)", use_container_width=True, key="yp_center"):
+            _set_yes_placement("Center (Main Flow)"); st.rerun()
+        if col2.button("→ Right Branch", use_container_width=True, key="yp_right", type="primary"):
+            _set_yes_placement("Right Branch"); st.rerun()
+
+    # ── yes_text ──────────────────────────────────────────────────────────────
     elif stage == "yes_text":
         sub_num = len(d.get("yes_steps", [])) + 1
         pending = d.get("_yes_pending", {})
         shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
-        placement_disp = next((p for p in PLACEMENT_OPTIONS
-                                if placement_to_col_side(p) == (pending.get("column","left"),
-                                                                 pending.get("connect_side","bottom (default)"))),
-                               "Main Flow")
+        placement_disp = "Center (Main Flow)" if pending.get("column","left")=="left" else "Right Branch"
         st.markdown(f'### ✅ YES Branch — Step {sub_num} Text')
         st.info(f'**{shape_name}** → **{placement_disp}**')
 
@@ -1154,9 +1116,7 @@ def render_diamond_wizard(existing_step_opts):
                     st.session_state.dw_stage = "yes_more"
                     st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: yes_more — does YES branch continue?
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── yes_more ──────────────────────────────────────────────────────────────
     elif stage == "yes_more":
         last = d["yes_steps"][-1]["text"]
         st.markdown("### ✅ YES Branch — Continue?")
@@ -1164,27 +1124,20 @@ def render_diamond_wizard(existing_step_opts):
 
         col1, col2, col3 = st.columns(3)
         if col1.button("➕ Add another YES sub-step", use_container_width=True):
-            st.session_state.dw_stage = "yes_shape"
-            st.rerun()
+            st.session_state.dw_stage = "yes_shape"; st.rerun()
         if col2.button("↩️ Loop back to a previous step", use_container_width=True):
-            st.session_state.dw_stage = "yes_loop"
-            st.rerun()
+            st.session_state.dw_stage = "yes_loop"; st.rerun()
         if col3.button("✅ Done with YES branch →", use_container_width=True, type="primary"):
             st.session_state.dw_stage = "no_shape"
-            d["_branch"] = "no"
-            d["_sub_idx"] = 0
-            st.rerun()
+            d["_branch"] = "no"; d["_sub_idx"] = 0; st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: yes_loop — pick loop-back target for YES
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── yes_loop ──────────────────────────────────────────────────────────────
     elif stage == "yes_loop":
         st.markdown("### ✅ YES Branch — Loop Back")
         if not existing_step_opts:
             st.warning("No previous steps to loop back to.")
             if st.button("Skip loop →", use_container_width=True):
-                st.session_state.dw_stage = "no_shape"
-                st.rerun()
+                st.session_state.dw_stage = "no_shape"; st.rerun()
         else:
             with st.form("dw_yes_loop"):
                 sel = st.selectbox("Loop back to which step?", existing_step_opts)
@@ -1195,12 +1148,9 @@ def render_diamond_wizard(existing_step_opts):
                         d["yes_loop_lbl"] = lbl.strip() or d.get("yes_label","YES")
                     except Exception:
                         pass
-                    st.session_state.dw_stage = "no_shape"
-                    st.rerun()
+                    st.session_state.dw_stage = "no_shape"; st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: no_shape
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── no_shape ──────────────────────────────────────────────────────────────
     elif stage == "no_shape":
         sub_num = len(d.get("no_steps", [])) + 1
         if sub_num == 1:
@@ -1211,65 +1161,53 @@ def render_diamond_wizard(existing_step_opts):
             prev = d["no_steps"][-1]["text"]
             st.info(f'After **"{prev}"** → next NO sub-step')
 
-        col1, col2 = st.columns(2)
         with st.form("dw_no_shape"):
-            shape_label = st.selectbox("What shape for this NO step?", list(SHAPE_NO_DIAM.keys()))
+            shape_label = st.selectbox("Shape for this NO step?", list(SHAPE_NO_DIAM.keys()))
             sub1, sub2 = st.columns(2)
-            with sub1:
-                skip_no = st.form_submit_button("⏭ Skip NO branch entirely", use_container_width=True)
-            with sub2:
-                go_next = st.form_submit_button("Next →", use_container_width=True, type="primary")
+            with sub1: skip_no = st.form_submit_button("⏭ Skip NO branch entirely", use_container_width=True)
+            with sub2: go_next = st.form_submit_button("Next →", use_container_width=True, type="primary")
 
             if skip_no:
-                st.session_state.dw_stage = "no_loop"
-                st.rerun()
+                st.session_state.dw_stage = "no_loop"; st.rerun()
             elif go_next:
                 d.setdefault("_no_pending", {})["shape"] = SHAPE_NO_DIAM[shape_label]
-                st.session_state.dw_stage = "no_placement"
-                st.rerun()
+                st.session_state.dw_stage = "no_placement"; st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: no_placement
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── no_placement — only Center or Right ───────────────────────────────────
     elif stage == "no_placement":
         sub_num = len(d.get("no_steps", [])) + 1
         pending = d.get("_no_pending", {})
         shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
         st.markdown(f'### ❌ NO Branch — Step {sub_num} Placement')
         st.info(f'Shape: **{shape_name}**')
-        st.markdown("**Where should this NO step appear? Click your choice:**")
+
         st.markdown("""
-<div style="background:#FFF5F5;border:1px solid #FEB2B2;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px">
-  <b>Main Flow</b> → stays in left column, arrow goes straight ↓<br>
-  <b>Left</b> → stays in left column, arrow goes left ←<br>
-  <b>Right</b> → moves to right column, arrow goes right →
+<div style="background:#FFF5F5;border:1px solid #FEB2B2;border-radius:8px;
+     padding:10px 14px;margin-bottom:12px;font-size:13px">
+  <b>⬇️ Center (Main Flow)</b> — stays in the centre column, arrow continues straight down<br><br>
+  <b>→ Right Branch</b> — moves to the right column, arrow goes right from the diamond
 </div>
 """, unsafe_allow_html=True)
-        p1, p2, p3 = st.columns(3)
+
+        col1, col2 = st.columns(2)
         def _set_no_placement(placement):
             col, side = placement_to_col_side(placement)
             pending["column"]       = col
             pending["connect_side"] = side
             d["_no_pending"] = pending
             st.session_state.dw_stage = "no_text"
-        if p1.button("⬇️ Main Flow\n(left col, down)", use_container_width=True, key="np_main"):
-            _set_no_placement("Main Flow"); st.rerun()
-        if p2.button("← Left\n(left col, elbow left)", use_container_width=True, key="np_left", type="primary"):
-            _set_no_placement("Left"); st.rerun()
-        if p3.button("→ Right\n(right col, elbow right)", use_container_width=True, key="np_right"):
-            _set_no_placement("Right"); st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: no_text
-    # ═══════════════════════════════════════════════════════════════════════════
+        if col1.button("⬇️ Center (Main Flow)", use_container_width=True, key="np_center", type="primary"):
+            _set_no_placement("Center (Main Flow)"); st.rerun()
+        if col2.button("→ Right Branch", use_container_width=True, key="np_right"):
+            _set_no_placement("Right Branch"); st.rerun()
+
+    # ── no_text ───────────────────────────────────────────────────────────────
     elif stage == "no_text":
         sub_num = len(d.get("no_steps", [])) + 1
         pending = d.get("_no_pending", {})
         shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
-        placement_disp = next((p for p in PLACEMENT_OPTIONS
-                                if placement_to_col_side(p) == (pending.get("column","left"),
-                                                                 pending.get("connect_side","bottom (default)"))),
-                               "Main Flow")
+        placement_disp = "Center (Main Flow)" if pending.get("column","left")=="left" else "Right Branch"
         st.markdown(f'### ❌ NO Branch — Step {sub_num} Text')
         st.info(f'**{shape_name}** → **{placement_disp}**')
 
@@ -1282,12 +1220,9 @@ def render_diamond_wizard(existing_step_opts):
                     pending["text"] = txt.strip()
                     d.setdefault("no_steps", []).append(dict(pending))
                     d["_no_pending"] = {}
-                    st.session_state.dw_stage = "no_more"
-                    st.rerun()
+                    st.session_state.dw_stage = "no_more"; st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: no_more
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── no_more ───────────────────────────────────────────────────────────────
     elif stage == "no_more":
         last = d["no_steps"][-1]["text"]
         st.markdown("### ❌ NO Branch — Continue?")
@@ -1295,27 +1230,19 @@ def render_diamond_wizard(existing_step_opts):
 
         col1, col2, col3 = st.columns(3)
         if col1.button("➕ Add another NO sub-step", use_container_width=True):
-            st.session_state.dw_stage = "no_shape"
-            st.rerun()
+            st.session_state.dw_stage = "no_shape"; st.rerun()
         if col2.button("↩️ Loop back to a previous step", use_container_width=True):
-            st.session_state.dw_stage = "no_loop"
-            st.rerun()
+            st.session_state.dw_stage = "no_loop"; st.rerun()
         if col3.button("✅ Done with NO branch →", use_container_width=True, type="primary"):
-            st.session_state.dw_stage = "review"
-            st.rerun()
+            st.session_state.dw_stage = "review"; st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: no_loop
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── no_loop ───────────────────────────────────────────────────────────────
     elif stage == "no_loop":
         st.markdown("### ❌ NO Branch — Loop Back")
-        col1, col2 = st.columns(2)
-
         if not existing_step_opts:
             st.warning("No previous steps to loop back to.")
             if st.button("Proceed to review →", use_container_width=True):
-                st.session_state.dw_stage = "review"
-                st.rerun()
+                st.session_state.dw_stage = "review"; st.rerun()
         else:
             with st.form("dw_no_loop"):
                 want_loop = st.checkbox("Loop back to a previous step?", value=False)
@@ -1328,16 +1255,12 @@ def render_diamond_wizard(existing_step_opts):
                             d["no_loop_lbl"] = lbl.strip() or d.get("no_label","NO")
                         except Exception:
                             pass
-                    st.session_state.dw_stage = "review"
-                    st.rerun()
+                    st.session_state.dw_stage = "review"; st.rerun()
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # STAGE: review — summary before committing
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── review ────────────────────────────────────────────────────────────────
     elif stage == "review":
         st.markdown("### 🔍 Review Before Adding")
 
-        # Diamond summary
         st.markdown(f"""
         <div style="background:#FFF9E6;border:1.5px solid #B7791F;border-radius:8px;
              padding:12px 16px;margin-bottom:10px">
@@ -1349,26 +1272,20 @@ def render_diamond_wizard(existing_step_opts):
         </div>
         """, unsafe_allow_html=True)
 
-        # YES steps
         if d.get("yes_steps"):
             st.markdown("**✅ YES steps:**")
             for i, s in enumerate(d["yes_steps"]):
-                placement_disp = next((p for p in PLACEMENT_OPTIONS
-                                        if placement_to_col_side(p) == (s["column"], s["connect_side"])),
-                                       s["column"])
+                placement_disp = "Center (Main Flow)" if s["column"]=="left" else "Right Branch"
                 st.markdown(f'- Step {i+1}: **{s["text"]}** `{s["shape"]}` → *{placement_disp}*')
             if d.get("yes_loop_to") != "":
                 st.markdown(f'- ↩️ Loop back to **Step {d["yes_loop_to"]}**  `{d.get("yes_loop_lbl","")}`')
         else:
             st.markdown("✅ **YES branch:** *(no sub-steps)*")
 
-        # NO steps
         if d.get("no_steps"):
             st.markdown("**❌ NO steps:**")
             for i, s in enumerate(d["no_steps"]):
-                placement_disp = next((p for p in PLACEMENT_OPTIONS
-                                        if placement_to_col_side(p) == (s["column"], s["connect_side"])),
-                                       s["column"])
+                placement_disp = "Center (Main Flow)" if s["column"]=="left" else "Right Branch"
                 st.markdown(f'- Step {i+1}: **{s["text"]}** `{s["shape"]}` → *{placement_disp}*')
             if d.get("no_loop_to") != "":
                 st.markdown(f'- ↩️ Loop back to **Step {d["no_loop_to"]}**  `{d.get("no_loop_lbl","")}`')
@@ -1378,8 +1295,7 @@ def render_diamond_wizard(existing_step_opts):
         st.markdown("---")
         c1, c2, c3 = st.columns(3)
         if c1.button("← Back to NO loop", use_container_width=True):
-            st.session_state.dw_stage = "no_loop"
-            st.rerun()
+            st.session_state.dw_stage = "no_loop"; st.rerun()
         if c2.button("✖ Cancel & discard", use_container_width=True):
             dw_reset(); st.rerun()
         if c3.button("✅ Add all steps to flowchart", use_container_width=True, type="primary"):
@@ -1388,7 +1304,7 @@ def render_diamond_wizard(existing_step_opts):
             st.success(f"✅ Added {n} step(s) to the flowchart!")
             st.rerun()
 
-    return True   # wizard is active
+    return True
 
 
 # ─── Streamlit UI ─────────────────────────────────────────────────────────────
@@ -1481,11 +1397,8 @@ with tab2:
                         except json.JSONDecodeError: st.error("⚠️ AI returned unexpected output. Try rephrasing.")
                         except Exception as e: st.error(f"⚠️ Error: {e}")
 
-        # ══════════════════════════════════════════════════════════════════════
-        # ✏️ MANUAL MODE
-        # ══════════════════════════════════════════════════════════════════════
+        # ── MANUAL MODE ───────────────────────────────────────────────────────
         else:
-            # Step index banner
             if st.session_state.steps:
                 refs = "  |  ".join([
                     f"**{i}** = {(s.get('text') or '')[:20]}"
@@ -1500,41 +1413,41 @@ with tab2:
                 for i in range(len(st.session_state.steps))
             ]
 
-            # ── If diamond wizard is active, show ONLY the wizard ─────────────
             if st.session_state.get("dw_active"):
                 render_diamond_wizard(existing_step_opts)
-
-            # ── Normal shape selector + form ──────────────────────────────────
             else:
                 shape_label = st.selectbox("🔷 Shape Type", list(SHAPE_TYPES.keys()), key="shape_sel")
                 is_diamond  = (shape_label == "Decision (Diamond)")
 
                 if is_diamond:
-                    # ── LAUNCH DIAMOND WIZARD ─────────────────────────────────
                     st.markdown("""
                     <div style="background:#FFF9E6;border:1.5px solid #B7791F;border-radius:10px;
                          padding:14px 18px;margin:10px 0">
                       <b style="font-size:15px">🔷 Decision (Diamond) — Guided Wizard</b><br>
                       <span style="font-size:13px;color:#555">
                         This wizard will guide you step-by-step through configuring the diamond,
-                        YES branch, NO branch, placements, sub-steps, and any loop-backs.
+                        YES branch (Center or Right), NO branch (Center or Right),
+                        sub-steps, and any loop-backs.
                       </span>
                     </div>
                     """, unsafe_allow_html=True)
 
                     if st.button("🚀 Start Diamond Wizard", type="primary", use_container_width=True):
-                        dw_start()
-                        st.rerun()
+                        dw_start(); st.rerun()
 
                 else:
-                    # ── NON-DIAMOND form (unchanged) ──────────────────────────
+                    # ── NON-DIAMOND form ──────────────────────────────────────
                     CONNECT_SIDE_OPTIONS_LOCAL = ["bottom (default)", "right side →", "left side ←"]
 
                     with st.form("add_step_form", clear_on_submit=True):
                         fc, ft = st.columns([2, 3])
-                        with fc: col_choice = st.selectbox("Column", COLUMN_OPTIONS)
-                        with ft: step_text  = st.text_input("Text inside shape *",
-                                                             placeholder="e.g. Start, Check Quality…")
+                        with fc:
+                            col_choice = st.selectbox("Column",
+                                ["Center (Main Flow)", "Right Branch"],
+                                help="Center = main/center column  |  Right Branch = right column")
+                        with ft:
+                            step_text = st.text_input("Text inside shape *",
+                                                       placeholder="e.g. Start, Check Quality…")
 
                         st.markdown("**Side-column data (optional)**")
                         sc1,sc2,sc3=st.columns(3)
@@ -1564,11 +1477,13 @@ with tab2:
                         if not step_text.strip():
                             st.warning("⚠️ Please enter text for the shape.")
                         else:
+                            # Map display name → internal column value
+                            col_internal = "left" if col_choice == "Center (Main Flow)" else "right"
                             cf_v = connect_from.strip() if connect_from.strip().isdigit() else ""
                             lt_v = loop_to.strip()       if loop_to.strip().isdigit()      else ""
                             st.session_state.steps.append(sanitize_step({
                                 "shape": SHAPE_TYPES[shape_label], "text": step_text.strip(),
-                                "column": col_choice,
+                                "column": col_internal,
                                 "input_label": input_label, "output_label": output_label,
                                 "responsible": responsible, "doc_format": doc_format,
                                 "measurement": measurement, "yes_label": "YES", "no_label": "NO",
@@ -1587,13 +1502,13 @@ with tab2:
                     rev_map = {v:k for k,v in SHAPE_TYPES.items()}
                     for i, step in enumerate(st.session_state.steps):
                         lbl = rev_map.get(step["shape"], step["shape"])
-                        ct  = "🔵 left" if step.get("column","left")=="left" else "🟢 right"
+                        col_disp = "⬇️ Center" if step.get("column","left")=="left" else "→ Right"
                         cf  = step.get("connect_from","")
                         cf_d= f"step {cf}" if str(cf).isdigit() else "auto"
                         lt  = step.get("loop_to","")
                         lt_d= f"step {lt}" if str(lt).isdigit() else "—"
                         with st.expander(
-                            f"**Step {i} (idx {i})** {ct} › [{lbl}]  {step.get('text','')}",
+                            f"**Step {i} (idx {i})** {col_disp} › [{lbl}]  {step.get('text','')}",
                             expanded=False):
                             nt = st.text_input("Edit text", value=(step.get("text") or ""), key=f"e_{i}")
                             if nt != step.get("text",""): st.session_state.steps[i]["text"]=nt; st.rerun()
@@ -1693,7 +1608,8 @@ with tab4:
         st.divider()
         st.subheader("Step Summary")
         rev_map={v:k for k,v in SHAPE_TYPES.items()}
-        rows=[{"Step (idx)":f"{i} (idx {i})","Col":s.get("column","left"),
+        rows=[{"Step (idx)":f"{i} (idx {i})",
+               "Col":"⬇️ Center" if s.get("column","left")=="left" else "→ Right",
                "Shape":rev_map.get(s["shape"],s["shape"]),
                "Text":(s.get("text") or ""),
                "Connect from":s.get("connect_from","") if str(s.get("connect_from","")).isdigit() else "auto",
