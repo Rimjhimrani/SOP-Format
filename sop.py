@@ -183,7 +183,8 @@ def generate_svg_preview(steps):
     ROW_GAP  = 36
     TOP_Y    = 50
 
-    # Arrowhead offset so the line stops before the box and the tip just touches the border
+    # Arrowhead size in px. SVG Y grows downward, so "above the box top" = smaller Y value.
+    # The line must stop at (box_top - AH_OFF) so the arrowhead tip lands exactly on box_top.
     AH_OFF = 8
 
     rows = []
@@ -276,22 +277,22 @@ def generate_svg_preview(steps):
             src = int(cf)
             if 0 <= src < len(anchors):
                 s = anchors[src]
-                # ── FIX: line stops AH_OFF px above the box top so arrowhead doesn't overlap ──
+                # ── FIX: line stops AH_OFF px ABOVE the box top (SVG Y grows down, so subtract) ──
                 if side == "right side →":
                     sx,sy = s["right"],s["cy"]; ex,ey = a["cx"],a["top"]
-                    arrow_svg += f'<path d="M{sx},{sy} L{ex},{sy} L{ex},{ey+AH_OFF}" fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
+                    arrow_svg += f'<path d="M{sx},{sy} L{ex},{sy} L{ex},{ey-AH_OFF}" fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
                     arrow_svg += f'<path d="{ah(ex,ey)}" fill="{ac}"/>'
                 elif side == "left side ←":
                     sx,sy = s["left"],s["cy"]; ex,ey = a["cx"],a["top"]
-                    arrow_svg += f'<path d="M{sx},{sy} L{ex},{sy} L{ex},{ey+AH_OFF}" fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
+                    arrow_svg += f'<path d="M{sx},{sy} L{ex},{sy} L{ex},{ey-AH_OFF}" fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
                     arrow_svg += f'<path d="{ah(ex,ey)}" fill="{ac}"/>'
                 else:
                     sx,sy = s["cx"],s["bot"]; ex,ey = a["cx"],a["top"]
                     if abs(sx-ex)<3:
-                        arrow_svg += f'<line x1="{sx}" y1="{sy}" x2="{ex}" y2="{ey+AH_OFF}" stroke="{ac}" stroke-width="1.6"/>'
+                        arrow_svg += f'<line x1="{sx}" y1="{sy}" x2="{ex}" y2="{ey-AH_OFF}" stroke="{ac}" stroke-width="1.6"/>'
                     else:
                         my=(sy+ey)/2
-                        arrow_svg += f'<path d="M{sx},{sy} L{sx},{my} L{ex},{my} L{ex},{ey+AH_OFF}" fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
+                        arrow_svg += f'<path d="M{sx},{sy} L{sx},{my} L{ex},{my} L{ex},{ey-AH_OFF}" fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
                     arrow_svg += f'<path d="{ah(ex,ey)}" fill="{ac}"/>'
                 if lbl:
                     mx=(s["cx"]+a["cx"])/2; my=(s["bot"]+a["top"])/2-3
@@ -302,8 +303,8 @@ def generate_svg_preview(steps):
                 prev = next((pi for pi in range(idx-1,-1,-1) if anchors[pi]["col"]==a["col"]),None)
                 if prev is not None:
                     ps = anchors[prev]
-                    # auto-connect: also apply fix
-                    arrow_svg += f'<line x1="{a["cx"]}" y1="{ps["bot"]}" x2="{a["cx"]}" y2="{a["top"]+AH_OFF}" stroke="{ARROW}" stroke-width="1.6"/>'
+                    # auto-connect: line stops before box top
+                    arrow_svg += f'<line x1="{a["cx"]}" y1="{ps["bot"]}" x2="{a["cx"]}" y2="{a["top"]-AH_OFF}" stroke="{ARROW}" stroke-width="1.6"/>'
                     arrow_svg += f'<path d="{ah(a["cx"],a["top"])}" fill="{ARROW}"/>'
 
         if lt.isdigit():
@@ -464,7 +465,8 @@ def arrow_head(c, tx, ty, d="down"):
     p.close(); c.drawPath(p,fill=1,stroke=0)
 
 def pdf_arrow_down(c, x, y1, y2, col=colors.black):
-    """Draw a vertical arrow; line stops before the box so head doesn't overlap."""
+    """Draw a vertical arrow. ReportLab Y grows upward, so y2 is the TOP of the box
+    (higher Y value). Line stops AH_MM below y2 so the tip doesn't overlap the box."""
     c.setStrokeColor(col); c.setLineWidth(0.7)
     AH_MM = 2.5 * 1.5 + 1.5   # arrowhead height + small gap
     c.line(x, y1, x, y2 + AH_MM)
@@ -472,14 +474,17 @@ def pdf_arrow_down(c, x, y1, y2, col=colors.black):
     c.setStrokeColor(colors.black)
 
 def pdf_elbow(c, sx,sy, ex,ey, col=colors.black, lbl="", lbl_col=colors.black):
-    """Elbow connector; vertical segment stops before box so head doesn't overlap."""
+    """Elbow connector. ReportLab Y grows upward; ey is the TOP of the target box.
+    Line stops AH_MM below ey so arrowhead tip lands on the box border cleanly."""
     AH_MM = 2.5 * 1.5 + 1.5
     c.setStrokeColor(col); c.setLineWidth(0.7)
     c.line(sx, sy, ex, sy)
     if ey < sy:
+        # target box is visually ABOVE (higher on page = lower Y in ReportLab)
         c.line(ex, sy, ex, ey + AH_MM)
         arrow_head(c, ex, ey, "down")
     else:
+        # target box is visually BELOW
         c.line(ex, sy, ex, ey - AH_MM)
         arrow_head(c, ex, ey, "up")
     if lbl:
