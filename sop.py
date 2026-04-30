@@ -79,14 +79,16 @@ CONNECT_SIDE_OPTIONS = ["bottom (default)", "right side →", "left side ←"]
 # ── PLACEMENT: only Center (main flow) or Right branch ────────────────────────
 # "Left" is intentionally removed. Main flow stays in the CENTER column.
 # Right branch goes to the right column.
-PLACEMENT_OPTIONS = ["Center (Main Flow)", "Right Branch"]
+PLACEMENT_OPTIONS = ["Center (Main Flow)", "Left Branch", "Right Branch"]
 
 def placement_to_col_side(placement):
     """Convert user-friendly placement to (column, connect_side)."""
     if placement == "Center (Main Flow)":
-        return "left", "bottom (default)"   # 'left' col = center in our 2-col layout
+        return "left", "bottom (default)"    # center main flow column
+    elif placement == "Left Branch":
+        return "left_branch", "left side ←"  # dedicated left branch column
     elif placement == "Right Branch":
-        return "right", "right side →"
+        return "right", "right side →"       # right branch column
     # Fallback
     return "left", "bottom (default)"
 
@@ -176,11 +178,12 @@ def generate_svg_preview(steps):
             <div style="text-align:center"><div style="font-size:32px;margin-bottom:8px">🔷</div>
             <div>Add steps to see your flowchart here</div></div></div>"""
 
-    SVG_W    = 720
-    # ── Center column is truly centred; right column is to the right ──────────
-    COL_L_CX = 200   # "left" col = center main flow (was 190, now more centred)
-    COL_R_CX = 530   # right branch column
-    BOX_W    = 170
+    SVG_W       = 780
+    # ── 3 columns: left_branch | center (main) | right ────────────────────────
+    COL_LB_CX = 130   # left branch column
+    COL_L_CX  = 390   # center / main flow column
+    COL_R_CX  = 650   # right branch column
+    BOX_W     = 160
     SH_H = {"rect":56,"oval":44,"parallelogram":56,"diamond":76,"arrow_text":28}
     ROW_GAP  = 36
     TOP_Y    = 50
@@ -196,16 +199,24 @@ def generate_svg_preview(steps):
                 if rows[ri]["right"] is None:
                     rows[ri]["right"] = idx; step_to_row[idx] = ri; placed = True; break
             if not placed:
-                rows.append({"left":None,"right":idx}); step_to_row[idx] = len(rows)-1
+                rows.append({"left_branch":None,"left":None,"right":idx}); step_to_row[idx] = len(rows)-1
+        elif col == "left_branch":
+            placed = False
+            for ri in range(len(rows)-1,-1,-1):
+                if rows[ri]["left_branch"] is None:
+                    rows[ri]["left_branch"] = idx; step_to_row[idx] = ri; placed = True; break
+            if not placed:
+                rows.append({"left_branch":idx,"left":None,"right":None}); step_to_row[idx] = len(rows)-1
         else:
-            rows.append({"left":idx,"right":None}); step_to_row[idx] = len(rows)-1
+            rows.append({"left_branch":None,"left":idx,"right":None}); step_to_row[idx] = len(rows)-1
 
     row_geom = []
     cy = TOP_Y
     for row in rows:
-        hl = SH_H.get(steps[row["left"]]["shape"],  56) if row["left"]  is not None else 0
-        hr = SH_H.get(steps[row["right"]]["shape"], 56) if row["right"] is not None else 0
-        rh = max(hl, hr)
+        hlb = SH_H.get(steps[row["left_branch"]]["shape"], 56) if row.get("left_branch") is not None else 0
+        hl  = SH_H.get(steps[row["left"]]["shape"],        56) if row.get("left")         is not None else 0
+        hr  = SH_H.get(steps[row["right"]]["shape"],       56) if row.get("right")        is not None else 0
+        rh  = max(hlb, hl, hr)
         row_geom.append({"y_top": cy, "row_h": rh})
         cy += rh + ROW_GAP
     SVG_H = cy + 20
@@ -214,8 +225,10 @@ def generate_svg_preview(steps):
     for idx, step in enumerate(steps):
         ri  = step_to_row[idx]; rg = row_geom[ri]
         col = step.get("column","left")
-        cx  = COL_L_CX if col=="left" else COL_R_CX
-        sh  = SH_H.get(step["shape"],56)
+        if   col == "left_branch": cx = COL_LB_CX
+        elif col == "right":       cx = COL_R_CX
+        else:                      cx = COL_L_CX
+        sh    = SH_H.get(step["shape"],56)
         y_top = rg["y_top"]
         y_bot = y_top + sh
         anchors[idx] = {
@@ -342,15 +355,24 @@ def generate_svg_preview(steps):
         shape_svg += f'<text x="{x0+11}" y="{y0+15}" text-anchor="middle" font-size="8" font-weight="700" fill="white" font-family="\'Segoe UI\',sans-serif">{idx+1}</text>'
         shape_svg += '</g>'
 
-    has_right = any(s.get("column","left")=="right" for s in steps)
-    # ── Updated header labels: "Center (Main Flow)" instead of "Main Flow" ───
-    hdr_svg  = f'<rect x="20" y="6" width="240" height="20" rx="4" fill="#EBF4FF" stroke="#2B6CB0" stroke-width="0.8"/>'
+    has_right    = any(s.get("column","left")=="right"        for s in steps)
+    has_left_br  = any(s.get("column","left")=="left_branch"  for s in steps)
+
+    # Center header always shown
+    hdr_svg  = f'<rect x="{COL_L_CX-120}" y="6" width="240" height="20" rx="4" fill="#EBF4FF" stroke="#2B6CB0" stroke-width="0.8"/>'
     hdr_svg += f'<text x="{COL_L_CX}" y="20" text-anchor="middle" font-size="12" font-weight="600" fill="#1A365D" font-family="\'Segoe UI\',sans-serif">Center (Main Flow)</text>'
+
+    if has_left_br:
+        hdr_svg += f'<rect x="{COL_LB_CX-80}" y="6" width="160" height="20" rx="4" fill="#FFF5F5" stroke="#C53030" stroke-width="0.8"/>'
+        hdr_svg += f'<text x="{COL_LB_CX}" y="20" text-anchor="middle" font-size="12" font-weight="600" fill="#C53030" font-family="\'Segoe UI\',sans-serif">Left Branch</text>'
+        mid_l = (COL_LB_CX + BOX_W/2 + COL_L_CX - BOX_W/2) / 2
+        hdr_svg += f'<line x1="{mid_l}" y1="30" x2="{mid_l}" y2="{SVG_H-10}" stroke="#CBD5E0" stroke-width="1" stroke-dasharray="4 4"/>'
+
     if has_right:
         hdr_svg += f'<rect x="{COL_R_CX-100}" y="6" width="200" height="20" rx="4" fill="#F0FFF4" stroke="#276749" stroke-width="0.8"/>'
         hdr_svg += f'<text x="{COL_R_CX}" y="20" text-anchor="middle" font-size="12" font-weight="600" fill="#1C4532" font-family="\'Segoe UI\',sans-serif">Right Branch</text>'
-        mid=(COL_L_CX+BOX_W/2+COL_R_CX-BOX_W/2)/2
-        hdr_svg += f'<line x1="{mid}" y1="30" x2="{mid}" y2="{SVG_H-10}" stroke="#CBD5E0" stroke-width="1" stroke-dasharray="4 4"/>'
+        mid_r = (COL_L_CX + BOX_W/2 + COL_R_CX - BOX_W/2) / 2
+        hdr_svg += f'<line x1="{mid_r}" y1="30" x2="{mid_r}" y2="{SVG_H-10}" stroke="#CBD5E0" stroke-width="1" stroke-dasharray="4 4"/>'
 
     LX=SVG_W-145; LY=TOP_Y
     leg_items=[("rect","#EBF4FF","#2B6CB0","Process"),("oval","#2D3748","#1A202C","Terminator"),
@@ -1066,7 +1088,7 @@ def render_diamond_wizard(existing_step_opts):
                 st.session_state.dw_stage = "yes_placement"
                 st.rerun()
 
-    # ── yes_placement — only Center or Right ──────────────────────────────────
+    # ── yes_placement — Center, Left Branch, Right Branch ────────────────────
     elif stage == "yes_placement":
         sub_num = len(d.get("yes_steps", [])) + 1
         pending = d.get("_yes_pending", {})
@@ -1077,12 +1099,13 @@ def render_diamond_wizard(existing_step_opts):
         st.markdown("""
 <div style="background:#F0FFF4;border:1px solid #9AE6B4;border-radius:8px;
      padding:10px 14px;margin-bottom:12px;font-size:13px">
-  <b>⬇️ Center (Main Flow)</b> — stays in the centre column, arrow continues straight down<br><br>
+  <b>⬇️ Center (Main Flow)</b> — stays in the centre column, arrow continues straight down<br>
+  <b>← Left Branch</b> — moves to the left column, arrow goes left from the diamond<br>
   <b>→ Right Branch</b> — moves to the right column, arrow goes right from the diamond
 </div>
 """, unsafe_allow_html=True)
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         def _set_yes_placement(placement):
             col, side = placement_to_col_side(placement)
             pending["column"]       = col
@@ -1092,7 +1115,9 @@ def render_diamond_wizard(existing_step_opts):
 
         if col1.button("⬇️ Center (Main Flow)", use_container_width=True, key="yp_center"):
             _set_yes_placement("Center (Main Flow)"); st.rerun()
-        if col2.button("→ Right Branch", use_container_width=True, key="yp_right", type="primary"):
+        if col2.button("← Left Branch", use_container_width=True, key="yp_left"):
+            _set_yes_placement("Left Branch"); st.rerun()
+        if col3.button("→ Right Branch", use_container_width=True, key="yp_right", type="primary"):
             _set_yes_placement("Right Branch"); st.rerun()
 
     # ── yes_text ──────────────────────────────────────────────────────────────
