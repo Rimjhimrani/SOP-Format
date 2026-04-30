@@ -76,20 +76,16 @@ SHAPE_NO_DIAM = {k: v for k, v in SHAPE_TYPES.items() if v != "diamond"}
 COLUMN_OPTIONS = ["left", "right"]
 CONNECT_SIDE_OPTIONS = ["bottom (default)", "right side →", "left side ←"]
 
-# ── PLACEMENT: only Center (main flow) or Right branch ────────────────────────
-# "Left" is intentionally removed. Main flow stays in the CENTER column.
-# Right branch goes to the right column.
 PLACEMENT_OPTIONS = ["Center (Main Flow)", "Left Branch", "Right Branch"]
 
 def placement_to_col_side(placement):
     """Convert user-friendly placement to (column, connect_side)."""
     if placement == "Center (Main Flow)":
-        return "left", "bottom (default)"    # center main flow column
+        return "left", "bottom (default)"
     elif placement == "Left Branch":
-        return "left_branch", "left side ←"  # dedicated left branch column
+        return "left_branch", "left side ←"
     elif placement == "Right Branch":
-        return "right", "right side →"       # right branch column
-    # Fallback
+        return "right", "right side →"
     return "left", "bottom (default)"
 
 # ─── AI System Prompt ─────────────────────────────────────────────────────────
@@ -179,10 +175,9 @@ def generate_svg_preview(steps):
             <div>Add steps to see your flowchart here</div></div></div>"""
 
     SVG_W       = 780
-    # ── 3 columns: left_branch | center (main) | right ────────────────────────
-    COL_LB_CX = 130   # left branch column
-    COL_L_CX  = 390   # center / main flow column
-    COL_R_CX  = 650   # right branch column
+    COL_LB_CX = 130
+    COL_L_CX  = 390
+    COL_R_CX  = 650
     BOX_W     = 160
     SH_H = {"rect":56,"oval":44,"parallelogram":56,"diamond":76,"arrow_text":28}
     ROW_GAP  = 36
@@ -358,7 +353,6 @@ def generate_svg_preview(steps):
     has_right    = any(s.get("column","left")=="right"        for s in steps)
     has_left_br  = any(s.get("column","left")=="left_branch"  for s in steps)
 
-    # Center header always shown
     hdr_svg  = f'<rect x="{COL_L_CX-120}" y="6" width="240" height="20" rx="4" fill="#EBF4FF" stroke="#2B6CB0" stroke-width="0.8"/>'
     hdr_svg += f'<text x="{COL_L_CX}" y="20" text-anchor="middle" font-size="12" font-weight="600" fill="#1A365D" font-family="\'Segoe UI\',sans-serif">Center (Main Flow)</text>'
 
@@ -988,8 +982,7 @@ def dw_commit():
 def render_diamond_wizard(existing_step_opts):
     """
     Renders the guided Diamond wizard UI.
-    Only TWO placements offered: Center (Main Flow) and Right Branch.
-    "Left" has been removed entirely.
+    Both YES and NO branches offer: Center (Main Flow), Left Branch, Right Branch.
     """
     d    = st.session_state.dw_data
     stage = st.session_state.dw_stage
@@ -1088,7 +1081,7 @@ def render_diamond_wizard(existing_step_opts):
                 st.session_state.dw_stage = "yes_placement"
                 st.rerun()
 
-    # ── yes_placement — Center, Left Branch, Right Branch ────────────────────
+    # ── yes_placement ─────────────────────────────────────────────────────────
     elif stage == "yes_placement":
         sub_num = len(d.get("yes_steps", [])) + 1
         pending = d.get("_yes_pending", {})
@@ -1125,7 +1118,13 @@ def render_diamond_wizard(existing_step_opts):
         sub_num = len(d.get("yes_steps", [])) + 1
         pending = d.get("_yes_pending", {})
         shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
-        placement_disp = "Center (Main Flow)" if pending.get("column","left")=="left" else "Right Branch"
+        col_val = pending.get("column", "left")
+        if col_val == "left_branch":
+            placement_disp = "Left Branch"
+        elif col_val == "right":
+            placement_disp = "Right Branch"
+        else:
+            placement_disp = "Center (Main Flow)"
         st.markdown(f'### ✅ YES Branch — Step {sub_num} Text')
         st.info(f'**{shape_name}** → **{placement_disp}**')
 
@@ -1198,7 +1197,7 @@ def render_diamond_wizard(existing_step_opts):
                 d.setdefault("_no_pending", {})["shape"] = SHAPE_NO_DIAM[shape_label]
                 st.session_state.dw_stage = "no_placement"; st.rerun()
 
-    # ── no_placement — only Center or Right ───────────────────────────────────
+    # ── no_placement — NOW includes Left Branch option (same as YES) ──────────
     elif stage == "no_placement":
         sub_num = len(d.get("no_steps", [])) + 1
         pending = d.get("_no_pending", {})
@@ -1209,12 +1208,14 @@ def render_diamond_wizard(existing_step_opts):
         st.markdown("""
 <div style="background:#FFF5F5;border:1px solid #FEB2B2;border-radius:8px;
      padding:10px 14px;margin-bottom:12px;font-size:13px">
-  <b>⬇️ Center (Main Flow)</b> — stays in the centre column, arrow continues straight down<br><br>
+  <b>⬇️ Center (Main Flow)</b> — stays in the centre column, arrow continues straight down<br>
+  <b>← Left Branch</b> — moves to the left column, arrow goes left from the diamond<br>
   <b>→ Right Branch</b> — moves to the right column, arrow goes right from the diamond
 </div>
 """, unsafe_allow_html=True)
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
+
         def _set_no_placement(placement):
             col, side = placement_to_col_side(placement)
             pending["column"]       = col
@@ -1224,7 +1225,9 @@ def render_diamond_wizard(existing_step_opts):
 
         if col1.button("⬇️ Center (Main Flow)", use_container_width=True, key="np_center", type="primary"):
             _set_no_placement("Center (Main Flow)"); st.rerun()
-        if col2.button("→ Right Branch", use_container_width=True, key="np_right"):
+        if col2.button("← Left Branch", use_container_width=True, key="np_left"):
+            _set_no_placement("Left Branch"); st.rerun()
+        if col3.button("→ Right Branch", use_container_width=True, key="np_right"):
             _set_no_placement("Right Branch"); st.rerun()
 
     # ── no_text ───────────────────────────────────────────────────────────────
@@ -1232,7 +1235,13 @@ def render_diamond_wizard(existing_step_opts):
         sub_num = len(d.get("no_steps", [])) + 1
         pending = d.get("_no_pending", {})
         shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
-        placement_disp = "Center (Main Flow)" if pending.get("column","left")=="left" else "Right Branch"
+        col_val = pending.get("column", "left")
+        if col_val == "left_branch":
+            placement_disp = "Left Branch"
+        elif col_val == "right":
+            placement_disp = "Right Branch"
+        else:
+            placement_disp = "Center (Main Flow)"
         st.markdown(f'### ❌ NO Branch — Step {sub_num} Text')
         st.info(f'**{shape_name}** → **{placement_disp}**')
 
@@ -1300,7 +1309,13 @@ def render_diamond_wizard(existing_step_opts):
         if d.get("yes_steps"):
             st.markdown("**✅ YES steps:**")
             for i, s in enumerate(d["yes_steps"]):
-                placement_disp = "Center (Main Flow)" if s["column"]=="left" else "Right Branch"
+                col_val = s.get("column", "left")
+                if col_val == "left_branch":
+                    placement_disp = "Left Branch"
+                elif col_val == "right":
+                    placement_disp = "Right Branch"
+                else:
+                    placement_disp = "Center (Main Flow)"
                 st.markdown(f'- Step {i+1}: **{s["text"]}** `{s["shape"]}` → *{placement_disp}*')
             if d.get("yes_loop_to") != "":
                 st.markdown(f'- ↩️ Loop back to **Step {d["yes_loop_to"]}**  `{d.get("yes_loop_lbl","")}`')
@@ -1310,7 +1325,13 @@ def render_diamond_wizard(existing_step_opts):
         if d.get("no_steps"):
             st.markdown("**❌ NO steps:**")
             for i, s in enumerate(d["no_steps"]):
-                placement_disp = "Center (Main Flow)" if s["column"]=="left" else "Right Branch"
+                col_val = s.get("column", "left")
+                if col_val == "left_branch":
+                    placement_disp = "Left Branch"
+                elif col_val == "right":
+                    placement_disp = "Right Branch"
+                else:
+                    placement_disp = "Center (Main Flow)"
                 st.markdown(f'- Step {i+1}: **{s["text"]}** `{s["shape"]}` → *{placement_disp}*')
             if d.get("no_loop_to") != "":
                 st.markdown(f'- ↩️ Loop back to **Step {d["no_loop_to"]}**  `{d.get("no_loop_lbl","")}`')
@@ -1451,7 +1472,7 @@ with tab2:
                       <b style="font-size:15px">🔷 Decision (Diamond) — Guided Wizard</b><br>
                       <span style="font-size:13px;color:#555">
                         This wizard will guide you step-by-step through configuring the diamond,
-                        YES branch (Center or Right), NO branch (Center or Right),
+                        YES branch (Center, Left, or Right), NO branch (Center, Left, or Right),
                         sub-steps, and any loop-backs.
                       </span>
                     </div>
@@ -1468,8 +1489,8 @@ with tab2:
                         fc, ft = st.columns([2, 3])
                         with fc:
                             col_choice = st.selectbox("Column",
-                                ["Center (Main Flow)", "Right Branch"],
-                                help="Center = main/center column  |  Right Branch = right column")
+                                ["Center (Main Flow)", "Left Branch", "Right Branch"],
+                                help="Center = main/center column  |  Left Branch = left column  |  Right Branch = right column")
                         with ft:
                             step_text = st.text_input("Text inside shape *",
                                                        placeholder="e.g. Start, Check Quality…")
@@ -1503,7 +1524,12 @@ with tab2:
                             st.warning("⚠️ Please enter text for the shape.")
                         else:
                             # Map display name → internal column value
-                            col_internal = "left" if col_choice == "Center (Main Flow)" else "right"
+                            if col_choice == "Center (Main Flow)":
+                                col_internal = "left"
+                            elif col_choice == "Left Branch":
+                                col_internal = "left_branch"
+                            else:
+                                col_internal = "right"
                             cf_v = connect_from.strip() if connect_from.strip().isdigit() else ""
                             lt_v = loop_to.strip()       if loop_to.strip().isdigit()      else ""
                             st.session_state.steps.append(sanitize_step({
@@ -1527,7 +1553,13 @@ with tab2:
                     rev_map = {v:k for k,v in SHAPE_TYPES.items()}
                     for i, step in enumerate(st.session_state.steps):
                         lbl = rev_map.get(step["shape"], step["shape"])
-                        col_disp = "⬇️ Center" if step.get("column","left")=="left" else "→ Right"
+                        col_val = step.get("column","left")
+                        if col_val == "left_branch":
+                            col_disp = "← Left"
+                        elif col_val == "right":
+                            col_disp = "→ Right"
+                        else:
+                            col_disp = "⬇️ Center"
                         cf  = step.get("connect_from","")
                         cf_d= f"step {cf}" if str(cf).isdigit() else "auto"
                         lt  = step.get("loop_to","")
@@ -1634,7 +1666,7 @@ with tab4:
         st.subheader("Step Summary")
         rev_map={v:k for k,v in SHAPE_TYPES.items()}
         rows=[{"Step (idx)":f"{i} (idx {i})",
-               "Col":"⬇️ Center" if s.get("column","left")=="left" else "→ Right",
+               "Col": "← Left" if s.get("column","left")=="left_branch" else ("→ Right" if s.get("column","left")=="right" else "⬇️ Center"),
                "Shape":rev_map.get(s["shape"],s["shape"]),
                "Text":(s.get("text") or ""),
                "Connect from":s.get("connect_from","") if str(s.get("connect_from","")).isdigit() else "auto",
