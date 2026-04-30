@@ -221,14 +221,21 @@ def generate_svg_preview(steps):
         if   col == "left_branch": cx = COL_LB_CX
         elif col == "right":       cx = COL_R_CX
         else:                      cx = COL_L_CX
-        sh    = SH_H.get(step["shape"],56)
-        y_top = rg["y_top"]
-        y_bot = y_top + sh
+        sh      = SH_H.get(step["shape"], 56)
+        row_h   = rg["row_h"]
+        # Vertically CENTER the shape within the row so branch boxes align with diamonds
+        sh_top  = rg["y_top"] + (row_h - sh) / 2
+        sh_bot  = sh_top + sh
+        sh_cy   = sh_top + sh / 2
         anchors[idx] = {
-            "cx":cx, "cy":y_top+sh/2,
-            "top":y_top, "bot":y_bot,
-            "left":cx-BOX_W/2, "right":cx+BOX_W/2,
-            "col":col, "sh":sh
+            "cx":    cx,
+            "cy":    sh_cy,
+            "top":   sh_top,          # actual visual top edge of shape
+            "bot":   sh_bot,          # actual visual bottom edge of shape
+            "left":  cx - BOX_W/2,
+            "right": cx + BOX_W/2,
+            "col":   col,
+            "sh":    sh,
         }
 
     def esc(t): return str(t).replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
