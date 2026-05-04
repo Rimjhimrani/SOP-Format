@@ -182,16 +182,9 @@ def generate_svg_preview(steps):
     ROW_GAP  = 36
     TOP_Y    = 50
 
-    # ── Arrowhead constants ──────────────────────────────────────────────────
-    # In SVG, Y grows DOWNWARD.
-    # For a "down" arrowhead: tip at (tx, ty), body at (tx±sz, ty - AH_H)
-    # The LINE must stop at ty - AH_H (at the triangle base), NOT at ty.
-    # This way: line → triangle base → triangle tip → box edge (no overlap).
-    AH_SZ  = 4          # half-width of arrowhead base
-    AH_H   = AH_SZ * 1.8   # = 7.2px — height of arrowhead triangle
-    # The line must stop at the triangle BASE (AH_H before the tip).
-    # We add an extra 2px gap so the line end doesn't bleed into the triangle.
-    AH_LINE_STOP = AH_H + 2   # = 9.2px — line ends this far before the tip
+    AH_SZ  = 4
+    AH_H   = AH_SZ * 1.8
+    AH_LINE_STOP = AH_H + 2
 
     rows = []
     step_to_row = {}
@@ -261,17 +254,6 @@ def generate_svg_preview(steps):
         return out
 
     def ah(tx, ty, d="down"):
-        """
-        Draw arrowhead with TIP at (tx, ty). SVG Y grows DOWNWARD.
-        
-        down  → tip at bottom (ty), body ABOVE (ty - AH_H has smaller Y = higher on screen)
-        up    → tip at top (ty), body BELOW (ty + AH_H)
-        right → tip at right (tx), body to the LEFT (tx - AH_H)
-        left  → tip at left (tx), body to the RIGHT (tx + AH_H)
-        
-        The CALLING CODE must stop the line at the triangle BASE,
-        not at the tip, to avoid the line poking through the arrowhead.
-        """
         sz = AH_SZ
         h  = AH_H
         if d == "down":
@@ -303,29 +285,20 @@ def generate_svg_preview(steps):
                 s = anchors[src]
 
                 if side == "right side →":
-                    # Exit source RIGHT side → enter target LEFT side horizontally
-                    # Arrow tip lands on target LEFT border, pointing RIGHT
                     sx, sy = s["right"], s["cy"]
                     ex, ey = a["left"], a["cy"]
 
                     if abs(sy - ey) < 3:
-                        # Same vertical level — pure horizontal line
-                        # Line stops AH_LINE_STOP before tip; tip is at ex,ey pointing right
-                        # For "right" arrow: tip at ex, base at ex - AH_H (to the left of tip)
-                        # So line must end at ex - AH_LINE_STOP
                         arrow_svg += (
                             f'<line x1="{sx}" y1="{sy}" x2="{ex - AH_LINE_STOP}" y2="{ey}" '
                             f'stroke="{ac}" stroke-width="1.6"/>'
                         )
                     else:
                         mid_y = (sy + ey) / 2
-                        # L-shaped path: right then down then right to target
-                        # Last horizontal segment stops AH_LINE_STOP before tip
                         arrow_svg += (
                             f'<path d="M{sx},{sy} L{sx},{mid_y} L{ex - AH_LINE_STOP},{mid_y} L{ex - AH_LINE_STOP},{ey}" '
                             f'fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
                         )
-                    # Tip at target left edge, pointing right
                     arrow_svg += f'<path d="{ah(ex, ey, "right")}" fill="{ac}"/>'
                     if lbl:
                         lbl_x = (sx + ex) / 2; lbl_y = sy - 3
@@ -333,15 +306,10 @@ def generate_svg_preview(steps):
                         arrow_svg += f'<text x="{lbl_x}" y="{lbl_y+2}" text-anchor="middle" font-size="10" font-weight="700" fill="{ac}" font-family="\'Segoe UI\',sans-serif">{esc(lbl)}</text>'
 
                 elif side == "left side ←":
-                    # Exit source LEFT side → enter target RIGHT side
-                    # Arrow tip lands on target RIGHT border, pointing LEFT
                     sx, sy = s["left"], s["cy"]
                     ex, ey = a["right"], a["cy"]
 
                     if abs(sy - ey) < 3:
-                        # Pure horizontal; tip at ex pointing left
-                        # For "left" arrow: tip at ex, base at ex + AH_H (to the right of tip)
-                        # Line must end at ex + AH_LINE_STOP
                         arrow_svg += (
                             f'<line x1="{sx}" y1="{sy}" x2="{ex + AH_LINE_STOP}" y2="{ey}" '
                             f'stroke="{ac}" stroke-width="1.6"/>'
@@ -352,51 +320,27 @@ def generate_svg_preview(steps):
                             f'<path d="M{sx},{sy} L{sx},{mid_y} L{ex + AH_LINE_STOP},{mid_y} L{ex + AH_LINE_STOP},{ey}" '
                             f'fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
                         )
-                    # Tip at target right edge, pointing left
                     arrow_svg += f'<path d="{ah(ex, ey, "left")}" fill="{ac}"/>'
                     if lbl:
                         lbl_x = (sx + ex) / 2; lbl_y = sy - 3
                         arrow_svg += f'<rect x="{lbl_x-20}" y="{lbl_y-9}" width="40" height="14" rx="3" fill="white" stroke="{ac}" stroke-width="0.7" opacity="0.93"/>'
                         arrow_svg += f'<text x="{lbl_x}" y="{lbl_y+2}" text-anchor="middle" font-size="10" font-weight="700" fill="{ac}" font-family="\'Segoe UI\',sans-serif">{esc(lbl)}</text>'
 
-                else:  # bottom (default) — downward arrow
-                    # Exit source BOTTOM → enter target TOP
-                    # Arrow tip lands on target TOP border, pointing DOWN
-                    # In SVG: Y grows downward, so target top has SMALLER y than target bottom
-                    # tip at (ex, ey=a["top"]) pointing down
-                    # For "down" arrow: tip at ey, base at ey - AH_H (ABOVE tip = smaller Y)
-                    # Line must end at ey - AH_LINE_STOP (above the arrowhead base)
-                    # BUT WAIT: source is ABOVE target, so source.bot < target.top in screen coords
-                    # but in SVG: source.bot has LARGER y than source.top,
-                    # and target.top has LARGER y than source.bot (target is lower on screen)
-                    # So: s["bot"] < a["top"] (numerically in SVG Y coords... NO)
-                    # Actually in SVG Y increases downward:
-                    #   source is visually ABOVE target => source.bot (Y) < target.top (Y)? NO.
-                    #   source is higher on screen => source has SMALLER Y values
-                    #   target.top Y value > source.bot Y value
-                    # So the line goes from s["bot"] (smaller Y, higher) to a["top"] (larger Y, lower)
-                    # The tip is at a["top"] (larger Y = lower on screen) pointing DOWN
-                    # The arrowhead base is at a["top"] - AH_H (smaller Y = just above tip)
-                    # The line must stop at a["top"] - AH_LINE_STOP
-
+                else:
                     sx, sy = s["cx"], s["bot"]
                     ex, ey = a["cx"], a["top"]
 
                     if abs(sx - ex) < 3:
-                        # Straight vertical down
-                        # Line from s["bot"] down to (a["top"] - AH_LINE_STOP)
                         arrow_svg += (
                             f'<line x1="{sx}" y1="{sy}" x2="{ex}" y2="{ey - AH_LINE_STOP}" '
                             f'stroke="{ac}" stroke-width="1.6"/>'
                         )
                     else:
-                        # Elbow: drop to midpoint, jog across, then drop to AH_LINE_STOP above tip
                         my = (sy + ey) / 2
                         arrow_svg += (
                             f'<path d="M{sx},{sy} L{sx},{my} L{ex},{my} L{ex},{ey - AH_LINE_STOP}" '
                             f'fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
                         )
-                    # Tip at target top, pointing down
                     arrow_svg += f'<path d="{ah(ex, ey, "down")}" fill="{ac}"/>'
                     if lbl:
                         mx=(s["cx"]+a["cx"])/2; my=(s["bot"]+a["top"])/2-3
@@ -407,8 +351,6 @@ def generate_svg_preview(steps):
                 prev = next((pi for pi in range(idx-1,-1,-1) if anchors[pi]["col"]==a["col"]),None)
                 if prev is not None:
                     ps = anchors[prev]
-                    # Auto-connect: straight down
-                    # Line stops AH_LINE_STOP before tip; tip at a["top"] pointing down
                     arrow_svg += (
                         f'<line x1="{a["cx"]}" y1="{ps["bot"]}" x2="{a["cx"]}" y2="{a["top"] - AH_LINE_STOP}" '
                         f'stroke="{ARROW}" stroke-width="1.6"/>'
@@ -419,19 +361,6 @@ def generate_svg_preview(steps):
             dest = anchors[int(lt)]
             lc = YES_C if ll.upper()=="YES" else (NO_C if ll.upper()=="NO" else "#1a6dcc")
             lx = a["left"] - 24
-            # Loop-back: goes left from current box, up to destination row, then right into destination left side
-            # Tip points right, landing on dest["left"]
-            # Line must stop AH_LINE_STOP before dest["left"] (i.e. dest["left"] - AH_LINE_STOP... 
-            # but "right" arrowhead: tip at dest["left"], base at dest["left"] - AH_H (to the left)
-            # No wait: for "right" pointing arrow entering from LEFT side:
-            # tip at dest["left"] going right INTO the box; base is to the LEFT of tip
-            # So line from (lx, dest["cy"]) going RIGHT to (dest["left"] - AH_LINE_STOP)
-            # Hmm but lx is to the LEFT of dest["left"], so we go right toward dest["left"]
-            # Line stops at dest["left"] - AH_LINE_STOP, tip at dest["left"]
-            # Actually for loop arrows entering from the LEFT:
-            # we come from the LEFT side and the tip points RIGHT into the box
-            # "right" ah: tip at tx, base at tx - AH_H (to the left of tip)
-            # So line ends at dest["left"] - AH_LINE_STOP ✓
             arrow_svg += f'<path d="M{a["left"]},{a["cy"]} L{lx},{a["cy"]} L{lx},{dest["cy"]} L{dest["left"] - AH_LINE_STOP},{dest["cy"]}" fill="none" stroke="{lc}" stroke-width="1.6" stroke-dasharray="5 3" stroke-linejoin="round"/>'
             arrow_svg += f'<path d="{ah(dest["left"], dest["cy"], "right")}" fill="{lc}"/>'
             if ll:
@@ -578,92 +507,69 @@ def draw_ltext(c, text, x, cy, max_w, fn="Helvetica", fs=10, col=colors.black):
         c.drawString(x, y0 - i * lh, ln)
 
 # ── PDF arrowhead constants ───────────────────────────────────────────────────
-# ReportLab Y grows UPWARD (opposite of SVG).
-# sz=2.5mm → triangle legs = sz*1.5 = 3.75mm
-# Line must stop at triangle BASE (not tip) to avoid overlapping the box.
 PDF_AH_SZ  = 2.0
-PDF_AH_LEG = PDF_AH_SZ * 1.8   # 3.6mm
-PDF_AH_GAP = 1.0               # extra gap mm — increased to avoid overlap
-PDF_AH_LINE_STOP = (PDF_AH_LEG + PDF_AH_GAP) * mm  # line stops this far from tip
+PDF_AH_LEG = PDF_AH_SZ * 1.8
+PDF_AH_GAP = 1.0
+PDF_AH_LINE_STOP = (PDF_AH_LEG + PDF_AH_GAP) * mm
 
 def arrow_head(c, tx, ty, d="down"):
-    """
-    Draw arrowhead with TIP at (tx, ty). ReportLab Y grows UPWARD.
-    
-    down  → tip points down (lower Y); body ABOVE tip (ty + PDF_AH_LEG)
-    up    → tip points up (higher Y);  body BELOW tip (ty - PDF_AH_LEG)
-    right → tip points right;          body LEFT of tip (tx - PDF_AH_LEG)
-    left  → tip points left;           body RIGHT of tip (tx + PDF_AH_LEG)
-    
-    Calling code must stop the line at the triangle BASE to avoid overlap.
-    """
-    sz = PDF_AH_SZ
-    leg = PDF_AH_LEG
+    sz = PDF_AH_SZ * mm
+    leg = PDF_AH_LEG * mm
     c.setFillColor(colors.black)
     p = c.beginPath()
     if d == "down":
-        # In ReportLab: down = lower Y. Tip at ty (low), base ABOVE (ty + leg)
-        p.moveTo(tx, ty)
-        p.lineTo(tx - sz, ty + leg)
-        p.lineTo(tx + sz, ty + leg)
+        p.moveTo(tx, ty); p.lineTo(tx - sz, ty + leg); p.lineTo(tx + sz, ty + leg)
     elif d == "up":
-        # Tip at ty (high), base BELOW (ty - leg)
-        p.moveTo(tx, ty)
-        p.lineTo(tx - sz, ty - leg)
-        p.lineTo(tx + sz, ty - leg)
+        p.moveTo(tx, ty); p.lineTo(tx - sz, ty - leg); p.lineTo(tx + sz, ty - leg)
     elif d == "right":
-        # Tip at tx (right), base LEFT (tx - leg)
-        p.moveTo(tx, ty)
-        p.lineTo(tx - leg, ty + sz)
-        p.lineTo(tx - leg, ty - sz)
+        p.moveTo(tx, ty); p.lineTo(tx - leg, ty + sz); p.lineTo(tx - leg, ty - sz)
     elif d == "left":
-        # Tip at tx (left), base RIGHT (tx + leg)
-        p.moveTo(tx, ty)
-        p.lineTo(tx + leg, ty + sz)
-        p.lineTo(tx + leg, ty - sz)
-    p.close()
-    c.drawPath(p, fill=1, stroke=0)
+        p.moveTo(tx, ty); p.lineTo(tx + leg, ty + sz); p.lineTo(tx + leg, ty - sz)
+    p.close(); c.drawPath(p, fill=1, stroke=0)
 
 def pdf_arrow_down(c, x, y_src_bot, y_tgt_top, col=colors.black):
-    """
-    Draw a vertical downward arrow in PDF coordinates (Y grows upward).
-    y_src_bot : bottom edge of source shape (higher Y = higher on page)
-    y_tgt_top : top edge of target shape   (lower Y = lower on page, visually below source)
-    
-    Arrow travels from y_src_bot DOWN to y_tgt_top.
-    In ReportLab: "down on page" = decreasing Y.
-    Tip lands at y_tgt_top pointing DOWN (d="down").
-    For "down" arrowhead: tip at ty, base at ty + PDF_AH_LEG (above tip in ReportLab).
-    Line must stop at y_tgt_top + PDF_AH_LINE_STOP (i.e. at triangle base, above the tip).
-    """
-    c.setStrokeColor(col)
-    c.setLineWidth(0.7)
-    # Line goes from source bottom DOWN; stops at triangle base ABOVE tip
-    # In ReportLab going "down" = decreasing Y
-    # Triangle base is ABOVE tip = y_tgt_top + PDF_AH_LEG (higher Y = higher on page)
-    # So line runs from y_src_bot (high Y) down to y_tgt_top + PDF_AH_LINE_STOP (lower Y but still above tip)
+    """Straight vertical downward arrow. ReportLab Y grows upward."""
+    c.setStrokeColor(col); c.setLineWidth(0.7)
     c.line(x, y_src_bot, x, y_tgt_top + PDF_AH_LINE_STOP)
     arrow_head(c, x, y_tgt_top, "down")
     c.setStrokeColor(colors.black)
 
-def pdf_elbow(c, sx, sy, ex, ey, col=colors.black, lbl="", lbl_col=colors.black):
+def pdf_arrow_right(c, x_src, y, x_tgt, col=colors.black, lbl="", lbl_col=colors.black):
+    """Horizontal arrow going right from x_src to x_tgt at height y."""
+    c.setStrokeColor(col); c.setLineWidth(0.7)
+    c.line(x_src, y, x_tgt - PDF_AH_LINE_STOP, y)
+    arrow_head(c, x_tgt, y, "right")
+    if lbl:
+        mid_x = (x_src + x_tgt) / 2
+        c.setFont("Helvetica-Bold", 8); c.setFillColor(lbl_col)
+        c.drawCentredString(mid_x, y + 1.5*mm, lbl)
+    c.setStrokeColor(colors.black); c.setFillColor(colors.black)
+
+def pdf_arrow_left(c, x_src, y, x_tgt, col=colors.black, lbl="", lbl_col=colors.black):
+    """Horizontal arrow going left from x_src to x_tgt at height y."""
+    c.setStrokeColor(col); c.setLineWidth(0.7)
+    c.line(x_src, y, x_tgt + PDF_AH_LINE_STOP, y)
+    arrow_head(c, x_tgt, y, "left")
+    if lbl:
+        mid_x = (x_src + x_tgt) / 2
+        c.setFont("Helvetica-Bold", 8); c.setFillColor(lbl_col)
+        c.drawCentredString(mid_x, y + 1.5*mm, lbl)
+    c.setStrokeColor(colors.black); c.setFillColor(colors.black)
+
+def pdf_elbow_to_top(c, sx, sy, ex, ey, col=colors.black, lbl="", lbl_col=colors.black):
     """
-    Elbow connector in ReportLab (Y grows upward).
-    Arrow always enters target from ABOVE (visually), so tip points DOWN.
-    ey = top edge of target shape (lower Y in ReportLab than source).
-    Line's final segment must stop at ey + PDF_AH_LINE_STOP (above the tip).
+    L-shaped connector: horizontal from (sx,sy) then vertical down to (ex, ey).
+    ey = top of target shape (lower Y in ReportLab).
+    Arrow tip points DOWN entering target top.
     """
-    c.setStrokeColor(col)
-    c.setLineWidth(0.7)
+    c.setStrokeColor(col); c.setLineWidth(0.7)
     c.line(sx, sy, ex, sy)
     c.line(ex, sy, ex, ey + PDF_AH_LINE_STOP)
     arrow_head(c, ex, ey, "down")
     if lbl:
-        c.setFont("Helvetica-Bold", 9)
-        c.setFillColor(lbl_col)
-        c.drawCentredString((sx + ex) / 2, sy + 2, lbl)
-    c.setStrokeColor(colors.black)
-    c.setFillColor(colors.black)
+        c.setFont("Helvetica-Bold", 8); c.setFillColor(lbl_col)
+        c.drawCentredString((sx + ex) / 2, sy + 1.5*mm, lbl)
+    c.setStrokeColor(colors.black); c.setFillColor(colors.black)
 
 def draw_rect(c, x,y,w,h,text, fs=10):
     c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.6)
@@ -695,6 +601,7 @@ def generate_pdf(steps, meta):
     TW=PW-ML-MR
     cur_y=PH-MT
 
+    # ── Header ──────────────────────────────────────────────────────────────
     HDR_H = 30*mm
     LOGO_W = 52*mm
     TITLE_W = 95*mm
@@ -728,20 +635,14 @@ def generate_pdf(steps, meta):
     cell_top  = cur_y
     cell_bot  = cur_y - HDR_H
 
-    SOP_FS   = 14
-    SUB_FS   = 11
-    SUB_LH   = SUB_FS + 2
-    GAP      = 5
-    SOP_LH   = SOP_FS + 2
+    SOP_FS   = 14; SUB_FS   = 11; SUB_LH   = SUB_FS + 2; GAP = 5; SOP_LH = SOP_FS + 2
 
     sub_lines = wrapped_lines_pdf(c, meta["title"], TITLE_W - 8, "Helvetica", SUB_FS)
     block_h   = SOP_LH + GAP + len(sub_lines) * SUB_LH
     block_top = (cell_top + cell_bot) / 2.0 + block_h / 2.0
 
-    c.setFont("Helvetica-Bold", SOP_FS)
-    c.setFillColor(colors.black)
+    c.setFont("Helvetica-Bold", SOP_FS); c.setFillColor(colors.black)
     c.drawCentredString(title_cx, block_top - SOP_LH * 0.80, "STANDARD OPERATING PROCEDURE")
-
     c.setFont("Helvetica", SUB_FS)
     sub_y0 = block_top - SOP_LH - GAP
     for i, ln in enumerate(sub_lines):
@@ -769,6 +670,7 @@ def generate_pdf(steps, meta):
     cur_y -= HDR_H
     cur_y -= 3*mm
 
+    # ── Purpose / Scope ──────────────────────────────────────────────────────
     PS_H=12*mm
     PL_W=20*mm; PV_W=80*mm; SL_W=16*mm; SV_W=TW-PL_W-PV_W-SL_W
     c.setLineWidth(0.6)
@@ -788,13 +690,51 @@ def generate_pdf(steps, meta):
     cur_y -= PS_H
     cur_y -= 3*mm
 
-    COL_IN   = 24*mm
-    COL_OUT  = 22*mm
+    # ── Process flow table layout ─────────────────────────────────────────────
+    # The flow area is divided into: Input | [Left Branch | Center | Right Branch] | Output | Responsible | Doc | Measurement
+    # We mirror the SVG 3-column layout inside the Process Flow cell.
+
+    COL_IN   = 20*mm
+    COL_OUT  = 20*mm
     COL_RESP = 26*mm
-    COL_DOC  = 24*mm
+    COL_DOC  = 26*mm
     COL_MEAS = 26*mm
     COL_FLOW = TW - COL_IN - COL_OUT - COL_RESP - COL_DOC - COL_MEAS
 
+    # Check which sub-columns exist
+    has_left_br = any(s.get("column","left") == "left_branch" for s in steps)
+    has_right   = any(s.get("column","left") == "right"       for s in steps)
+
+    # Sub-column widths inside the flow area — mirror SVG proportions
+    # SVG: COL_LB_CX=130, COL_L_CX=390, COL_R_CX=650 in 780px wide canvas
+    # Proportions: LB~130/780≈0.167, Center~260/780≈0.333, Right~130/780≈0.167
+    # We allocate the flow area accordingly
+    if has_left_br and has_right:
+        SUB_LB_W = COL_FLOW * 0.25
+        SUB_C_W  = COL_FLOW * 0.50
+        SUB_R_W  = COL_FLOW * 0.25
+    elif has_left_br:
+        SUB_LB_W = COL_FLOW * 0.33
+        SUB_C_W  = COL_FLOW * 0.67
+        SUB_R_W  = 0
+    elif has_right:
+        SUB_LB_W = 0
+        SUB_C_W  = COL_FLOW * 0.60
+        SUB_R_W  = COL_FLOW * 0.40
+    else:
+        SUB_LB_W = 0
+        SUB_C_W  = COL_FLOW
+        SUB_R_W  = 0
+
+    FLOW_L = ML + COL_IN   # left edge of flow area
+    FLOW_R = FLOW_L + COL_FLOW  # right edge
+
+    # Centre X for each sub-column
+    LB_CX = FLOW_L + SUB_LB_W / 2 if has_left_br else None
+    C_CX  = FLOW_L + SUB_LB_W + SUB_C_W / 2
+    R_CX  = FLOW_L + SUB_LB_W + SUB_C_W + SUB_R_W / 2 if has_right else None
+
+    # Column X edges for outer table
     XS = [ML,
           ML+COL_IN,
           ML+COL_IN+COL_FLOW,
@@ -803,188 +743,259 @@ def generate_pdf(steps, meta):
           ML+COL_IN+COL_FLOW+COL_OUT+COL_RESP+COL_DOC,
           ML+TW]
 
-    FLOW_L = XS[1]; FLOW_W = COL_FLOW
-    FLOW_R = XS[2]
+    # Shape sizes in PDF (match SVG ratios)
+    SH_H_PDF = {"rect":12*mm, "oval":10*mm, "parallelogram":12*mm, "diamond":18*mm, "arrow_text":7*mm}
+    # Shape widths per column
+    def shape_w_for_col(col):
+        if col == "left_branch": return SUB_LB_W * 0.80
+        if col == "right":       return SUB_R_W  * 0.80
+        return SUB_C_W * 0.72
 
-    LEFT_CX  = FLOW_L + FLOW_W * 0.28
-    RIGHT_CX = FLOW_L + FLOW_W * 0.72
-    SH_W_L   = FLOW_W * 0.40
-    SH_W_R   = FLOW_W * 0.36
+    def cx_for_col(col):
+        if col == "left_branch": return LB_CX or C_CX
+        if col == "right":       return R_CX  or C_CX
+        return C_CX
 
-    HDR1_H=8*mm
-    c.setFillColor(colors.HexColor("#BDD7EE"))
-    c.rect(ML,cur_y-HDR1_H,TW,HDR1_H,fill=1,stroke=1)
-    c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
-    _banner_y = cur_y - HDR1_H/2 - 11*0.3
-    c.drawString(ML+3, _banner_y, "Process Steps:")
-    c.drawString(XS[2]+3, _banner_y, f"OWNER :   {meta['owner']}")
-    cur_y -= HDR1_H
+    V_PAD = 3*mm
+    TABLE_TOP = cur_y
 
-    HDR2_H=11*mm
-    hdr_labels=["Input","Process Flow","Output","Responsible","Doc. Format /\nSystem","Effective\nMeasurement"]
-    for i,label in enumerate(hdr_labels):
-        cw=XS[i+1]-XS[i]
-        c.setFillColor(colors.HexColor("#D6E8F7"))
-        c.rect(XS[i],cur_y-HDR2_H,cw,HDR2_H,fill=1,stroke=1); c.setFillColor(colors.black)
-        lines=label.split("\n")
-        fs_h = 9; lh = fs_h * 1.2
-        total_h = len(lines) * lh
-        y_mid = cur_y - HDR2_H / 2
-        y0 = y_mid + total_h / 2 - lh + lh * 0.25
-        for li, ln in enumerate(lines):
-            c.setFont("Helvetica-Bold", fs_h)
-            c.drawCentredString(XS[i]+cw/2, y0 - li*lh, ln)
-    cur_y -= HDR2_H
-
-    SH_H_PDF={"rect":12*mm,"oval":10*mm,"parallelogram":12*mm,"diamond":18*mm,"arrow_text":7*mm}
-    V_PAD=3*mm
-    TABLE_TOP=cur_y
-
-    rows=[]; step_to_row={}
-    for idx,step in enumerate(steps):
-        col=step.get("column","left")
-        if col=="right":
-            placed=False
+    # Build rows (same logic as SVG)
+    rows = []; step_to_row = {}
+    for idx, step in enumerate(steps):
+        col = step.get("column","left")
+        if col == "right":
+            placed = False
             for ri in range(len(rows)-1,-1,-1):
-                if rows[ri]["right"] is None:
-                    rows[ri]["right"]=idx; step_to_row[idx]=ri; placed=True; break
+                if rows[ri].get("right") is None:
+                    rows[ri]["right"] = idx; step_to_row[idx] = ri; placed = True; break
             if not placed:
-                rows.append({"left":None,"right":idx}); step_to_row[idx]=len(rows)-1
+                rows.append({"left_branch":None,"left":None,"right":idx}); step_to_row[idx] = len(rows)-1
+        elif col == "left_branch":
+            placed = False
+            for ri in range(len(rows)-1,-1,-1):
+                if rows[ri].get("left_branch") is None:
+                    rows[ri]["left_branch"] = idx; step_to_row[idx] = ri; placed = True; break
+            if not placed:
+                rows.append({"left_branch":idx,"left":None,"right":None}); step_to_row[idx] = len(rows)-1
         else:
-            rows.append({"left":idx,"right":None}); step_to_row[idx]=len(rows)-1
+            rows.append({"left_branch":None,"left":idx,"right":None}); step_to_row[idx] = len(rows)-1
 
-    row_geom=[]; sy2=cur_y
+    # Compute row heights
+    row_geom = []; sy2 = cur_y
     for row in rows:
-        hl=SH_H_PDF.get(steps[row["left"]]["shape"],12*mm)  if row["left"]  is not None else 0
-        hr=SH_H_PDF.get(steps[row["right"]]["shape"],12*mm) if row["right"] is not None else 0
-        ROW_H=max(hl,hr)+2*V_PAD
-        ry=sy2-ROW_H; row_geom.append({"ry":ry,"ROW_H":ROW_H}); sy2=ry
-    TABLE_BOTTOM=sy2
+        hl  = SH_H_PDF.get(steps[row["left"]]["shape"],  12*mm) if row.get("left")         is not None else 0
+        hr  = SH_H_PDF.get(steps[row["right"]]["shape"], 12*mm) if row.get("right")        is not None else 0
+        hlb = SH_H_PDF.get(steps[row["left_branch"]]["shape"],12*mm) if row.get("left_branch") is not None else 0
+        ROW_H = max(hl, hr, hlb) + 2*V_PAD
+        ry = sy2 - ROW_H
+        row_geom.append({"ry": ry, "ROW_H": ROW_H})
+        sy2 = ry
+    TABLE_BOTTOM = sy2
 
-    TBL_H=TABLE_TOP-TABLE_BOTTOM
-    c.setFillColor(colors.white); c.rect(ML,TABLE_BOTTOM,TW,TBL_H,fill=1,stroke=0)
+    TBL_H = TABLE_TOP - TABLE_BOTTOM
+
+    # ── Draw table border & column dividers ──────────────────────────────────
+    c.setFillColor(colors.white)
+    c.rect(ML, TABLE_BOTTOM, TW, TBL_H, fill=1, stroke=0)
     c.setStrokeColor(colors.black); c.setLineWidth(0.8)
-    c.rect(ML,TABLE_BOTTOM,TW,TBL_H,fill=0,stroke=1)
+    c.rect(ML, TABLE_BOTTOM, TW, TBL_H, fill=0, stroke=1)
     c.setLineWidth(0.5)
-    for x in XS[1:-1]: c.line(x,TABLE_BOTTOM,x,TABLE_TOP)
+    for x in XS[1:-1]:
+        c.line(x, TABLE_BOTTOM, x, TABLE_TOP)
+
+    # Sub-column dividers inside flow area
+    c.setLineWidth(0.3)
+    c.setStrokeColor(colors.HexColor("#CCCCCC"))
+    if has_left_br:
+        div_x = FLOW_L + SUB_LB_W
+        c.line(div_x, TABLE_BOTTOM, div_x, TABLE_TOP)
+    if has_right:
+        div_x = FLOW_L + SUB_LB_W + SUB_C_W
+        c.line(div_x, TABLE_BOTTOM, div_x, TABLE_TOP)
+    c.setStrokeColor(colors.black)
+
+    # Row dividers (input/output/responsible side columns only)
     c.setLineWidth(0.35)
-    for ri,rg in enumerate(row_geom[:-1]):
-        y=rg["ry"]
-        c.line(XS[0],y,XS[1],y)
-        c.line(XS[2],y,XS[-1],y)
+    for ri, rg in enumerate(row_geom[:-1]):
+        y = rg["ry"]
+        c.line(XS[0], y, XS[1], y)   # Input col
+        c.line(XS[2], y, XS[-1], y)  # Output + right cols
 
-    anchors={}
-    for idx,step in enumerate(steps):
-        ri=step_to_row[idx]; rg=row_geom[ri]; ry,ROW_H=rg["ry"],rg["ROW_H"]
-        col=step.get("column","left")
-        sh_h=SH_H_PDF.get(step["shape"],12*mm)
-        cx=LEFT_CX if col=="left" else RIGHT_CX
-        sh_w=SH_W_L if col=="left" else SH_W_R
-        sh_x=cx-sh_w/2
-        sh_bot=ry+V_PAD; sh_top=sh_bot+sh_h; sh_mid=sh_bot+sh_h/2
-        anchors[idx]={"cx":cx,"cy":sh_mid,"top":sh_top,"bot":sh_bot,
-                      "left":sh_x,"right":sh_x+sh_w,"sh_x":sh_x,
-                      "sh_w":sh_w,"sh_h":sh_h,"sh_bot":sh_bot,"col":col}
+    # ── Build shape anchors (PDF coords: Y grows upward) ─────────────────────
+    anchors = {}
+    for idx, step in enumerate(steps):
+        ri = step_to_row[idx]; rg = row_geom[ri]
+        ry, ROW_H = rg["ry"], rg["ROW_H"]
+        col = step.get("column","left")
+        sh_h = SH_H_PDF.get(step["shape"], 12*mm)
+        cx   = cx_for_col(col)
+        sw   = shape_w_for_col(col)
+        sh_x = cx - sw/2
+        sh_bot = ry + V_PAD
+        sh_top = sh_bot + sh_h
+        sh_mid = sh_bot + sh_h/2
+        anchors[idx] = {
+            "cx": cx, "cy": sh_mid,
+            "top": sh_top, "bot": sh_bot,
+            "left": sh_x, "right": sh_x + sw,
+            "sh_x": sh_x, "sh_w": sw, "sh_h": sh_h,
+            "sh_bot": sh_bot, "col": col
+        }
 
-    GREEN=colors.HexColor("#006600"); RED=colors.HexColor("#CC0000"); BLUE=colors.HexColor("#1a6dcc")
+    GREEN = colors.HexColor("#006600")
+    RED   = colors.HexColor("#CC0000")
+    BLUE  = colors.HexColor("#1a6dcc")
 
-    for pi,row in enumerate(rows):
-        rg=row_geom[pi]; ry,ROW_H=rg["ry"],rg["ROW_H"]
-        ref=row["left"] if row["left"] is not None else row["right"]
-        step=steps[ref]
-        for ci,key in [(0,"input_label"),(2,"output_label"),(3,"responsible"),(4,"doc_format"),(5,"measurement")]:
-            txt=(step.get(key) or "")
+    # ── Draw side-column text (input/output/responsible etc.) ─────────────────
+    for pi, row in enumerate(rows):
+        rg = row_geom[pi]; ry, ROW_H = rg["ry"], rg["ROW_H"]
+        ref = row["left"] if row.get("left") is not None else (
+              row["right"] if row.get("right") is not None else row.get("left_branch"))
+        if ref is None: continue
+        step = steps[ref]
+        for ci, key in [(0,"input_label"),(2,"output_label"),(3,"responsible"),(4,"doc_format"),(5,"measurement")]:
+            txt = (step.get(key) or "")
             if txt:
-                cw=XS[ci+1]-XS[ci]
-                draw_ctext(c,txt,XS[ci]+cw/2,ry+ROW_H/2,cw-3,fs=10)
+                cw = XS[ci+1]-XS[ci]
+                draw_ctext(c, txt, XS[ci]+cw/2, ry+ROW_H/2, cw-3, fs=9)
 
-    for idx,step in enumerate(steps):
-        a=anchors[idx]
-        cf=str(step.get("connect_from") or "")
-        lbl=(step.get("arrow_label") or "").strip()
-        side=step.get("connect_side","bottom (default)")
-        lt=str(step.get("loop_to") or "")
-        ll=(step.get("loop_label") or "").strip()
+    # ── Draw arrows ───────────────────────────────────────────────────────────
+    for idx, step in enumerate(steps):
+        a    = anchors[idx]
+        lbl  = (step.get("arrow_label") or "").strip()
+        cf   = str(step.get("connect_from") or "")
+        side = step.get("connect_side","bottom (default)")
+        lt   = str(step.get("loop_to") or "")
+        ll   = (step.get("loop_label") or "").strip()
 
-        ac=GREEN if lbl.upper()=="YES" else (RED if lbl.upper()=="NO" else colors.black)
+        ac = GREEN if lbl.upper()=="YES" else (RED if lbl.upper()=="NO" else colors.black)
 
         if cf.isdigit():
-            src=int(cf)
-            if 0<=src<len(anchors):
-                s=anchors[src]
-                if side=="right side →":
-                    pdf_elbow(c, s["right"], s["cy"], a["cx"], a["top"], col=ac, lbl=lbl, lbl_col=ac)
-                elif side=="left side ←":
-                    pdf_elbow(c, s["left"], s["cy"], a["cx"], a["top"], col=ac, lbl=lbl, lbl_col=ac)
-                else:
-                    if abs(s["cx"]-a["cx"])<2:
+            src = int(cf)
+            if 0 <= src < len(anchors):
+                s = anchors[src]
+
+                if side == "right side →":
+                    # Arrow exits source RIGHT side → enters target LEFT side horizontally
+                    sx, sy_arrow = s["right"], s["cy"]
+                    ex, ey_arrow = a["left"],  a["cy"]
+                    if abs(sy_arrow - ey_arrow) < 1*mm:
+                        # Pure horizontal
+                        pdf_arrow_right(c, sx, sy_arrow, ex, col=ac, lbl=lbl, lbl_col=ac)
+                    else:
+                        # Elbow: go right, drop/rise, then right into target top
+                        # Go right from source to target CX, then vertical to target top
+                        pdf_elbow_to_top(c, s["cx"], s["bot"], a["cx"], a["top"], col=ac, lbl=lbl, lbl_col=ac)
+
+                elif side == "left side ←":
+                    # Arrow exits source LEFT side → enters target RIGHT side horizontally
+                    sx, sy_arrow = s["left"], s["cy"]
+                    ex, ey_arrow = a["right"], a["cy"]
+                    if abs(sy_arrow - ey_arrow) < 1*mm:
+                        pdf_arrow_left(c, sx, sy_arrow, ex, col=ac, lbl=lbl, lbl_col=ac)
+                    else:
+                        # Elbow going left then down to target top
+                        c.setStrokeColor(ac); c.setLineWidth(0.7)
+                        c.line(sx, sy_arrow, a["cx"], sy_arrow)
+                        c.line(a["cx"], sy_arrow, a["cx"], a["top"] + PDF_AH_LINE_STOP)
+                        arrow_head(c, a["cx"], a["top"], "down")
+                        if lbl:
+                            c.setFont("Helvetica-Bold",8); c.setFillColor(ac)
+                            c.drawCentredString((sx+a["cx"])/2, sy_arrow+1.5*mm, lbl)
+                        c.setStrokeColor(colors.black); c.setFillColor(colors.black)
+
+                else:  # bottom (default) — straight or elbow downward
+                    if abs(s["cx"] - a["cx"]) < 2:
                         pdf_arrow_down(c, a["cx"], s["bot"], a["top"], col=ac)
                         if lbl:
-                            c.setFont("Helvetica-Bold",9); c.setFillColor(ac)
-                            c.drawCentredString(a["cx"]+5, (s["bot"]+a["top"])/2, lbl)
+                            c.setFont("Helvetica-Bold",8); c.setFillColor(ac)
+                            c.drawCentredString(a["cx"]+3*mm, (s["bot"]+a["top"])/2, lbl)
                             c.setFillColor(colors.black)
                     else:
-                        pdf_elbow(c, s["cx"], s["bot"], a["cx"], a["top"], col=ac, lbl=lbl, lbl_col=ac)
+                        pdf_elbow_to_top(c, s["cx"], s["bot"], a["cx"], a["top"], col=ac, lbl=lbl, lbl_col=ac)
         else:
-            if idx>0:
-                prev=next((pi for pi in range(idx-1,-1,-1) if anchors[pi]["col"]==a["col"]),None)
+            # Auto-connect: straight down to same-column previous step
+            if idx > 0:
+                prev = next((pi for pi in range(idx-1,-1,-1) if anchors[pi]["col"]==a["col"]), None)
                 if prev is not None:
-                    ps=anchors[prev]
+                    ps = anchors[prev]
                     pdf_arrow_down(c, a["cx"], ps["bot"], a["top"])
 
+        # Loop-back arrows
         if lt.isdigit():
-            dest=anchors[int(lt)]
-            lc=GREEN if ll.upper()=="YES" else (RED if ll.upper()=="NO" else BLUE)
-            margin=FLOW_L-4*mm
+            dest = anchors[int(lt)]
+            lc = GREEN if ll.upper()=="YES" else (RED if ll.upper()=="NO" else BLUE)
+            margin = FLOW_L - 4*mm
             c.setStrokeColor(lc); c.setLineWidth(0.7)
             c.line(a["sh_x"], a["cy"], margin, a["cy"])
             c.line(margin, a["cy"], margin, dest["cy"])
-            # Line stops PDF_AH_LINE_STOP before dest left edge; tip points right into box
-            # "right" arrowhead: tip at dest["left"], base LEFT of tip = dest["left"] - PDF_AH_LEG*mm
-            # Line ends at dest["left"] - PDF_AH_LINE_STOP... 
-            # but we're coming FROM the left going RIGHT, so line ends BEFORE (to the left of) the tip
-            # dest["left"] - PDF_AH_LINE_STOP would be further left than tip? No wait:
-            # We're at margin (some x value to the LEFT of dest["left"])
-            # Going RIGHT toward dest["left"]
-            # Arrowhead "right": tip at dest["left"] (rightmost point), base at dest["left"] - PDF_AH_LEG (left of tip)
-            # Line must end at dest["left"] - PDF_AH_LINE_STOP (at/before triangle base)
-            # Since PDF_AH_LINE_STOP = (PDF_AH_LEG + PDF_AH_GAP)*mm, the line stops JUST LEFT of triangle base
             c.line(margin, dest["cy"], dest["left"] - PDF_AH_LINE_STOP, dest["cy"])
             arrow_head(c, dest["left"], dest["cy"], "right")
             if ll:
                 c.setFont("Helvetica-Bold",8); c.setFillColor(lc)
-                c.drawString(margin+1, (a["cy"]+dest["cy"])/2+1, ll)
+                c.drawString(margin+1, (a["cy"]+dest["cy"])/2+1*mm, ll)
                 c.setFillColor(colors.black)
             c.setStrokeColor(colors.black)
 
-    for idx,step in enumerate(steps):
-        a=anchors[idx]
-        sh_x,sh_bot=a["sh_x"],a["sh_bot"]; sh_w,sh_h=a["sh_w"],a["sh_h"]
-        shape=step["shape"]; txt=(step.get("text") or "")
-        yl=(step.get("yes_label") or "YES"); nl=(step.get("no_label") or "NO")
+    # ── Draw shapes ───────────────────────────────────────────────────────────
+    for idx, step in enumerate(steps):
+        a = anchors[idx]
+        sh_x, sh_bot = a["sh_x"], a["sh_bot"]
+        sh_w, sh_h   = a["sh_w"], a["sh_h"]
+        shape = step["shape"]
+        txt   = (step.get("text") or "")
+        yl    = (step.get("yes_label") or "YES")
+        nl    = (step.get("no_label")  or "NO")
 
-        if   shape=="rect":          draw_rect(c,sh_x,sh_bot,sh_w,sh_h,txt)
-        elif shape=="oval":          draw_oval(c,sh_x,sh_bot,sh_w,sh_h,txt)
-        elif shape=="parallelogram": draw_para(c,sh_x,sh_bot,sh_w,sh_h,txt)
-        elif shape=="diamond":
-            draw_diamond(c,sh_x,sh_bot,sh_w,sh_h,txt)
-            c.setFont("Helvetica-Bold",9); c.setFillColor(GREEN)
-            c.drawString(sh_x+sh_w+2, a["cy"]-2, yl)
-            nw=c.stringWidth(nl,"Helvetica-Bold",9); c.setFillColor(RED)
-            c.drawString(sh_x-nw-4, a["cy"]-2, nl); c.setFillColor(colors.black)
-        elif shape=="arrow_text":
-            c.setFont("Helvetica-Oblique",9); c.setFillColor(colors.HexColor("#333333"))
-            c.drawCentredString(a["cx"],a["cy"],txt); c.setFillColor(colors.black)
+        if   shape == "rect":          draw_rect(c, sh_x, sh_bot, sh_w, sh_h, txt)
+        elif shape == "oval":          draw_oval(c, sh_x, sh_bot, sh_w, sh_h, txt)
+        elif shape == "parallelogram": draw_para(c, sh_x, sh_bot, sh_w, sh_h, txt)
+        elif shape == "diamond":
+            draw_diamond(c, sh_x, sh_bot, sh_w, sh_h, txt)
+            c.setFont("Helvetica-Bold",8); c.setFillColor(GREEN)
+            c.drawString(sh_x + sh_w + 1.5*mm, a["cy"] - 1.5*mm, yl)
+            nw = c.stringWidth(nl,"Helvetica-Bold",8); c.setFillColor(RED)
+            c.drawString(sh_x - nw - 1.5*mm, a["cy"] - 1.5*mm, nl)
+            c.setFillColor(colors.black)
+        elif shape == "arrow_text":
+            c.setFont("Helvetica-Oblique",8); c.setFillColor(colors.HexColor("#333333"))
+            c.drawCentredString(a["cx"], a["cy"], txt); c.setFillColor(colors.black)
 
-    cur_y=TABLE_BOTTOM
+    cur_y = TABLE_BOTTOM
 
-    cur_y -= 3*mm
-    CR_TH=8*mm
+    # ── Banner rows ───────────────────────────────────────────────────────────
+    HDR1_H = 8*mm
     c.setFillColor(colors.HexColor("#BDD7EE"))
-    c.rect(ML,cur_y-CR_TH,TW,CR_TH,fill=1,stroke=1)
+    c.rect(ML, TABLE_TOP, TW, HDR1_H, fill=1, stroke=1)
+    c.setFont("Helvetica-Bold", 11); c.setFillColor(colors.black)
+    _banner_y = TABLE_TOP + HDR1_H/2 - 11*0.3
+    c.drawString(ML+3, _banner_y, "Process Steps:")
+    c.drawString(XS[2]+3, _banner_y, f"OWNER :   {meta['owner']}")
+
+    HDR2_H = 11*mm
+    hdr_labels = ["Input","Process Flow","Output","Responsible","Doc. Format /\nSystem","Effective\nMeasurement"]
+    hdr_top = TABLE_TOP + HDR1_H
+    for i, label in enumerate(hdr_labels):
+        cw = XS[i+1]-XS[i]
+        c.setFillColor(colors.HexColor("#D6E8F7"))
+        c.rect(XS[i], hdr_top, cw, HDR2_H, fill=1, stroke=1); c.setFillColor(colors.black)
+        lines = label.split("\n"); fs_h = 9; lh = fs_h * 1.2
+        total_h = len(lines) * lh; y_mid = hdr_top + HDR2_H/2
+        y0 = y_mid + total_h/2 - lh + lh*0.25
+        for li, ln in enumerate(lines):
+            c.setFont("Helvetica-Bold", fs_h)
+            c.drawCentredString(XS[i]+cw/2, y0 - li*lh, ln)
+
+    cur_y = TABLE_BOTTOM
+
+    # ── SOP Change Record ─────────────────────────────────────────────────────
+    cur_y -= 3*mm
+    CR_TH = 8*mm
+    c.setFillColor(colors.HexColor("#BDD7EE"))
+    c.rect(ML, cur_y-CR_TH, TW, CR_TH, fill=1, stroke=1)
     c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
     c.drawCentredString(ML+TW/2, cur_y - CR_TH/2 - 11*0.3, "SOP Change Record")
-    cur_y-=CR_TH
+    cur_y -= CR_TH
 
     CR_COLS=["S.No.","Effective\nDate","REV.\nNo.","Change Description",
              "Change Letter\n(Process:P / Doc:D / System:S)","Prepared By","Reviewed By","Approved By"]
@@ -993,35 +1004,33 @@ def generate_pdf(steps, meta):
     CR_XS=[ML]
     for w in CR_W: CR_XS.append(CR_XS[-1]+w)
 
-    CR_HH=9*mm
-    for i,lbl in enumerate(CR_COLS):
-        cw=CR_XS[i+1]-CR_XS[i]
+    CR_HH = 9*mm
+    for i, lbl in enumerate(CR_COLS):
+        cw = CR_XS[i+1]-CR_XS[i]
         c.setFillColor(colors.HexColor("#D6E8F7"))
-        c.rect(CR_XS[i],cur_y-CR_HH,cw,CR_HH,fill=1,stroke=1); c.setFillColor(colors.black)
-        lines=lbl.split("\n")
-        fs_cr = 8; lh_cr = fs_cr * 1.2
-        total_h = len(lines) * lh_cr
-        y_mid = cur_y - CR_HH / 2
-        y0 = y_mid + total_h / 2 - lh_cr + lh_cr * 0.25
-        for li,ln in enumerate(lines):
+        c.rect(CR_XS[i], cur_y-CR_HH, cw, CR_HH, fill=1, stroke=1); c.setFillColor(colors.black)
+        lines = lbl.split("\n"); fs_cr = 8; lh_cr = fs_cr*1.2
+        total_h = len(lines)*lh_cr; y_mid = cur_y - CR_HH/2
+        y0 = y_mid + total_h/2 - lh_cr + lh_cr*0.25
+        for li, ln in enumerate(lines):
             c.setFont("Helvetica-Bold", fs_cr)
             c.drawCentredString(CR_XS[i]+cw/2, y0 - li*lh_cr, ln)
-    cur_y-=CR_HH
+    cur_y -= CR_HH
 
-    CR_RH=8*mm
+    CR_RH = 8*mm
     for row in meta.get("change_records",[]):
         vals=[row.get("sno",""),row.get("date",""),row.get("rev",""),row.get("desc",""),
               row.get("change_letter",""),row.get("prepared",""),row.get("reviewed",""),row.get("approved","")]
-        for i,val in enumerate(vals):
-            cw=CR_XS[i+1]-CR_XS[i]
+        for i, val in enumerate(vals):
+            cw = CR_XS[i+1]-CR_XS[i]
             c.setFillColor(colors.white); c.rect(CR_XS[i],cur_y-CR_RH,cw,CR_RH,fill=1,stroke=1)
-            draw_ctext(c,val,CR_XS[i]+cw/2,cur_y-CR_RH/2,cw-3,fs=9)
-        cur_y-=CR_RH
+            draw_ctext(c, val, CR_XS[i]+cw/2, cur_y-CR_RH/2, cw-3, fs=9)
+        cur_y -= CR_RH
     for _ in range(2):
         for i in range(len(CR_COLS)):
-            cw=CR_XS[i+1]-CR_XS[i]
+            cw = CR_XS[i+1]-CR_XS[i]
             c.setFillColor(colors.white); c.rect(CR_XS[i],cur_y-CR_RH,cw,CR_RH,fill=1,stroke=1)
-        cur_y-=CR_RH
+        cur_y -= CR_RH
 
     cur_y -= 5*mm
     c.setFont("Helvetica-Oblique",9); c.setFillColor(colors.HexColor("#555555"))
@@ -1031,7 +1040,7 @@ def generate_pdf(steps, meta):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DIAMOND WIZARD — helper functions
+# DIAMOND WIZARD
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def dw_reset():
@@ -1043,160 +1052,92 @@ def dw_start():
     st.session_state.dw_active = True
     st.session_state.dw_stage  = "diamond_text"
     st.session_state.dw_data   = {
-        "diamond_text": "",
-        "diamond_col":  "left",
-        "diamond_cf":   "",
-        "yes_label":    "YES",
-        "no_label":     "NO",
-        "yes_steps":    [],
-        "yes_loop_to":  "",
-        "yes_loop_lbl": "",
-        "no_steps":     [],
-        "no_loop_to":   "",
-        "no_loop_lbl":  "",
-        "_branch":      "yes",
-        "_sub_idx":     0,
-        "_sub_phase":   "shape",
+        "diamond_text": "", "diamond_col": "left", "diamond_cf": "",
+        "yes_label": "YES", "no_label": "NO",
+        "yes_steps": [], "yes_loop_to": "", "yes_loop_lbl": "",
+        "no_steps":  [], "no_loop_to":  "", "no_loop_lbl":  "",
+        "_branch": "yes", "_sub_idx": 0, "_sub_phase": "shape",
     }
 
 def dw_commit():
-    d = st.session_state.dw_data
-    added = 0
+    d = st.session_state.dw_data; added = 0
 
     diamond_step = sanitize_step({
-        "shape":        "diamond",
-        "text":         d["diamond_text"],
-        "column":       d["diamond_col"],
-        "connect_from": d["diamond_cf"],
-        "connect_side": "bottom (default)",
-        "arrow_label":  "",
-        "yes_label":    d.get("yes_label", "YES"),
-        "no_label":     d.get("no_label",  "NO"),
-        "loop_to":      "",
-        "loop_label":   "",
-        "input_label":  "",
-        "output_label": "",
-        "responsible":  "",
-        "doc_format":   "",
-        "measurement":  "",
+        "shape": "diamond", "text": d["diamond_text"], "column": d["diamond_col"],
+        "connect_from": d["diamond_cf"], "connect_side": "bottom (default)",
+        "arrow_label": "", "yes_label": d.get("yes_label","YES"), "no_label": d.get("no_label","NO"),
+        "loop_to": "", "loop_label": "", "input_label": "", "output_label": "",
+        "responsible": "", "doc_format": "", "measurement": "",
     })
     st.session_state.steps.append(diamond_step)
-    d_idx = len(st.session_state.steps) - 1
-    added += 1
-
+    d_idx = len(st.session_state.steps) - 1; added += 1
     diamond_loop_used = False
 
     yes_parent_idx = d_idx
-    for i, sub in enumerate(d.get("yes_steps", [])):
-        arrow_lbl = d.get("yes_label", "YES") if i == 0 else ""
-        conn_side = sub["connect_side"] if i == 0 else "bottom (default)"
+    for i, sub in enumerate(d.get("yes_steps",[])):
+        arrow_lbl = d.get("yes_label","YES") if i==0 else ""
+        conn_side = sub["connect_side"] if i==0 else "bottom (default)"
         s = sanitize_step({
-            "shape":        sub["shape"],
-            "text":         sub["text"],
-            "column":       sub["column"],
-            "connect_from": str(yes_parent_idx),
-            "connect_side": conn_side,
-            "arrow_label":  arrow_lbl,
-            "yes_label":    "YES",
-            "no_label":     "NO",
-            "loop_to":      "",
-            "loop_label":   "",
-            "input_label":  "",
-            "output_label": "",
-            "responsible":  "",
-            "doc_format":   "",
-            "measurement":  "",
+            "shape": sub["shape"], "text": sub["text"], "column": sub["column"],
+            "connect_from": str(yes_parent_idx), "connect_side": conn_side,
+            "arrow_label": arrow_lbl, "yes_label": "YES", "no_label": "NO",
+            "loop_to": "", "loop_label": "", "input_label": "", "output_label": "",
+            "responsible": "", "doc_format": "", "measurement": "",
         })
         st.session_state.steps.append(s)
-        yes_parent_idx = len(st.session_state.steps) - 1
-        added += 1
+        yes_parent_idx = len(st.session_state.steps)-1; added += 1
 
     if d.get("yes_loop_to") != "":
         if d["yes_steps"]:
-            last_yes_idx = yes_parent_idx
-            st.session_state.steps[last_yes_idx]["loop_to"]    = str(d["yes_loop_to"])
-            st.session_state.steps[last_yes_idx]["loop_label"] = d.get("yes_loop_lbl", "YES")
-        else:
-            if not diamond_loop_used:
-                st.session_state.steps[d_idx]["loop_to"]    = str(d["yes_loop_to"])
-                st.session_state.steps[d_idx]["loop_label"] = d.get("yes_loop_lbl", "YES")
-                diamond_loop_used = True
+            st.session_state.steps[yes_parent_idx]["loop_to"]    = str(d["yes_loop_to"])
+            st.session_state.steps[yes_parent_idx]["loop_label"] = d.get("yes_loop_lbl","YES")
+        elif not diamond_loop_used:
+            st.session_state.steps[d_idx]["loop_to"]    = str(d["yes_loop_to"])
+            st.session_state.steps[d_idx]["loop_label"] = d.get("yes_loop_lbl","YES")
+            diamond_loop_used = True
 
     no_parent_idx = d_idx
-    for i, sub in enumerate(d.get("no_steps", [])):
-        arrow_lbl = d.get("no_label", "NO") if i == 0 else ""
-        conn_side = sub["connect_side"] if i == 0 else "bottom (default)"
+    for i, sub in enumerate(d.get("no_steps",[])):
+        arrow_lbl = d.get("no_label","NO") if i==0 else ""
+        conn_side = sub["connect_side"] if i==0 else "bottom (default)"
         s = sanitize_step({
-            "shape":        sub["shape"],
-            "text":         sub["text"],
-            "column":       sub["column"],
-            "connect_from": str(no_parent_idx),
-            "connect_side": conn_side,
-            "arrow_label":  arrow_lbl,
-            "yes_label":    "YES",
-            "no_label":     "NO",
-            "loop_to":      "",
-            "loop_label":   "",
-            "input_label":  "",
-            "output_label": "",
-            "responsible":  "",
-            "doc_format":   "",
-            "measurement":  "",
+            "shape": sub["shape"], "text": sub["text"], "column": sub["column"],
+            "connect_from": str(no_parent_idx), "connect_side": conn_side,
+            "arrow_label": arrow_lbl, "yes_label": "YES", "no_label": "NO",
+            "loop_to": "", "loop_label": "", "input_label": "", "output_label": "",
+            "responsible": "", "doc_format": "", "measurement": "",
         })
         st.session_state.steps.append(s)
-        no_parent_idx = len(st.session_state.steps) - 1
-        added += 1
+        no_parent_idx = len(st.session_state.steps)-1; added += 1
 
     if d.get("no_loop_to") != "":
         if d["no_steps"]:
-            last_no_idx = no_parent_idx
-            st.session_state.steps[last_no_idx]["loop_to"]    = str(d["no_loop_to"])
-            st.session_state.steps[last_no_idx]["loop_label"] = d.get("no_loop_lbl", "NO")
+            st.session_state.steps[no_parent_idx]["loop_to"]    = str(d["no_loop_to"])
+            st.session_state.steps[no_parent_idx]["loop_label"] = d.get("no_loop_lbl","NO")
+        elif not diamond_loop_used:
+            st.session_state.steps[d_idx]["loop_to"]    = str(d["no_loop_to"])
+            st.session_state.steps[d_idx]["loop_label"] = d.get("no_loop_lbl","NO")
+            diamond_loop_used = True
         else:
-            if not diamond_loop_used:
-                st.session_state.steps[d_idx]["loop_to"]    = str(d["no_loop_to"])
-                st.session_state.steps[d_idx]["loop_label"] = d.get("no_loop_lbl", "NO")
-                diamond_loop_used = True
-            else:
-                connector = sanitize_step({
-                    "shape":        "arrow_text",
-                    "text":         f"← {d.get('no_label','NO')}",
-                    "column":       "left",
-                    "connect_from": str(d_idx),
-                    "connect_side": "left side ←",
-                    "arrow_label":  d.get("no_label","NO"),
-                    "loop_to":      str(d["no_loop_to"]),
-                    "loop_label":   d.get("no_loop_lbl","NO"),
-                    "yes_label":    "YES",
-                    "no_label":     "NO",
-                    "input_label":  "",
-                    "output_label": "",
-                    "responsible":  "",
-                    "doc_format":   "",
-                    "measurement":  "",
-                })
-                st.session_state.steps.append(connector)
-                added += 1
+            connector = sanitize_step({
+                "shape": "arrow_text", "text": f"← {d.get('no_label','NO')}", "column": "left",
+                "connect_from": str(d_idx), "connect_side": "left side ←",
+                "arrow_label": d.get("no_label","NO"), "loop_to": str(d["no_loop_to"]),
+                "loop_label": d.get("no_loop_lbl","NO"), "yes_label": "YES", "no_label": "NO",
+                "input_label": "", "output_label": "", "responsible": "", "doc_format": "", "measurement": "",
+            })
+            st.session_state.steps.append(connector); added += 1
 
     return added
 
 
 def render_diamond_wizard(existing_step_opts):
-    d    = st.session_state.dw_data
-    stage = st.session_state.dw_stage
+    d = st.session_state.dw_data; stage = st.session_state.dw_stage
 
-    STAGES = [
-        "diamond_text", "diamond_cf",
-        "yes_shape", "yes_placement", "yes_text", "yes_more",
-        "yes_loop",
-        "no_shape", "no_placement", "no_text", "no_more",
-        "no_loop",
-        "review",
-    ]
-    try:
-        pct = int((STAGES.index(stage) / (len(STAGES)-1)) * 100)
-    except ValueError:
-        pct = 0
+    STAGES = ["diamond_text","diamond_cf","yes_shape","yes_placement","yes_text","yes_more",
+              "yes_loop","no_shape","no_placement","no_text","no_more","no_loop","review"]
+    try: pct = int((STAGES.index(stage)/(len(STAGES)-1))*100)
+    except ValueError: pct = 0
 
     st.markdown(f"""
     <div style="background:#FFF9E6;border:1.5px solid #B7791F;border-radius:10px;
@@ -1206,32 +1147,26 @@ def render_diamond_wizard(existing_step_opts):
         <span style="font-size:12px;color:#B7791F">{pct}% complete</span>
       </div>
       <div style="background:#ECC94B;height:5px;border-radius:3px;width:{pct}%"></div>
-    </div>
-    """, unsafe_allow_html=True)
+    </div>""", unsafe_allow_html=True)
 
-    cancel_col, _ = st.columns([1, 5])
+    cancel_col, _ = st.columns([1,5])
     if cancel_col.button("✖ Cancel Wizard", key="dw_cancel"):
         dw_reset(); st.rerun()
-
     st.markdown("---")
 
     if stage == "diamond_text":
         st.markdown("### Step 1 — Define the Decision")
         with st.form("dw_diamond_text"):
-            txt = st.text_input("Decision question text *",
-                placeholder="e.g. Is stock available?  /  Quality OK?")
-            c1, c2 = st.columns(2)
+            txt = st.text_input("Decision question text *", placeholder="e.g. Is stock available?")
+            c1,c2 = st.columns(2)
             with c1: yes_lbl = st.text_input("YES label", value="YES")
             with c2: no_lbl  = st.text_input("NO label",  value="NO")
             if st.form_submit_button("Next →", use_container_width=True, type="primary"):
-                if not txt.strip():
-                    st.warning("⚠️ Please enter the decision question text.")
+                if not txt.strip(): st.warning("⚠️ Please enter the decision question text.")
                 else:
-                    d["diamond_text"] = txt.strip()
-                    d["yes_label"]    = yes_lbl.strip() or "YES"
-                    d["no_label"]     = no_lbl.strip()  or "NO"
-                    st.session_state.dw_stage = "diamond_cf"
-                    st.rerun()
+                    d["diamond_text"]=txt.strip(); d["yes_label"]=yes_lbl.strip() or "YES"
+                    d["no_label"]=no_lbl.strip() or "NO"
+                    st.session_state.dw_stage="diamond_cf"; st.rerun()
 
     elif stage == "diamond_cf":
         st.markdown("### Step 2 — Arrow into the Diamond")
@@ -1239,263 +1174,180 @@ def render_diamond_wizard(existing_step_opts):
         with st.form("dw_diamond_cf"):
             if existing_step_opts:
                 use_cf = st.checkbox("Connect from a specific previous step?", value=False)
-                if use_cf:
-                    cf_sel = st.selectbox("Connect from step", existing_step_opts)
-                else:
-                    cf_sel = None
+                cf_sel = st.selectbox("Connect from step", existing_step_opts) if use_cf else None
             else:
-                st.caption("(No previous steps — arrow will be automatic.)")
-                cf_sel = None; use_cf = False
-
+                st.caption("(No previous steps — arrow will be automatic.)"); cf_sel=None; use_cf=False
             if st.form_submit_button("Next →", use_container_width=True, type="primary"):
                 if use_cf and cf_sel:
-                    try:
-                        d["diamond_cf"] = str(int(cf_sel.split("Step ")[1].split(" :")[0]))
-                    except Exception:
-                        d["diamond_cf"] = ""
-                else:
-                    d["diamond_cf"] = ""
-                st.session_state.dw_stage = "yes_shape"
-                d["_branch"] = "yes"; d["_sub_idx"] = 0
-                st.rerun()
+                    try: d["diamond_cf"]=str(int(cf_sel.split("Step ")[1].split(" :")[0]))
+                    except: d["diamond_cf"]=""
+                else: d["diamond_cf"]=""
+                st.session_state.dw_stage="yes_shape"; d["_branch"]="yes"; d["_sub_idx"]=0; st.rerun()
 
     elif stage == "yes_shape":
-        sub_num = len(d.get("yes_steps", [])) + 1
-        if sub_num == 1:
-            st.markdown(f'### ✅ YES Branch — Step {sub_num}')
-            st.info(f'Diamond: **"{d["diamond_text"]}"** → **{d["yes_label"]}** path')
-        else:
-            st.markdown(f'### ✅ YES Branch — Sub-step {sub_num}')
-            prev = d["yes_steps"][-1]["text"]
-            st.info(f'After **"{prev}"** → next YES sub-step')
-
+        sub_num=len(d.get("yes_steps",[]))+1
+        st.markdown(f'### ✅ YES Branch — Step {sub_num}')
+        st.info(f'Diamond: **"{d["diamond_text"]}"** → **{d["yes_label"]}** path')
         with st.form("dw_yes_shape"):
-            shape_label = st.selectbox("Shape for this YES step?", list(SHAPE_NO_DIAM.keys()))
+            shape_label=st.selectbox("Shape for this YES step?", list(SHAPE_NO_DIAM.keys()))
             if st.form_submit_button("Next →", use_container_width=True, type="primary"):
-                d.setdefault("_yes_pending", {})["shape"] = SHAPE_NO_DIAM[shape_label]
-                st.session_state.dw_stage = "yes_placement"
-                st.rerun()
+                d.setdefault("_yes_pending",{})["shape"]=SHAPE_NO_DIAM[shape_label]
+                st.session_state.dw_stage="yes_placement"; st.rerun()
 
     elif stage == "yes_placement":
-        sub_num = len(d.get("yes_steps", [])) + 1
-        pending = d.get("_yes_pending", {})
-        shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
+        sub_num=len(d.get("yes_steps",[]))+1
+        pending=d.get("_yes_pending",{})
+        shape_name={v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"),"Process")
         st.markdown(f'### ✅ YES Branch — Step {sub_num} Placement')
         st.info(f'Shape: **{shape_name}**')
-
-        col1, col2, col3 = st.columns(3)
+        col1,col2,col3=st.columns(3)
         def _set_yes_placement(placement):
-            col, side = placement_to_col_side(placement)
-            pending["column"]       = col
-            pending["connect_side"] = side
-            d["_yes_pending"] = pending
-            st.session_state.dw_stage = "yes_text"
-
-        if col1.button("⬇️ Center (Main Flow)", use_container_width=True, key="yp_center"):
-            _set_yes_placement("Center (Main Flow)"); st.rerun()
-        if col2.button("← Left Branch", use_container_width=True, key="yp_left"):
-            _set_yes_placement("Left Branch"); st.rerun()
-        if col3.button("→ Right Branch", use_container_width=True, key="yp_right", type="primary"):
-            _set_yes_placement("Right Branch"); st.rerun()
+            col,side=placement_to_col_side(placement)
+            pending["column"]=col; pending["connect_side"]=side; d["_yes_pending"]=pending
+            st.session_state.dw_stage="yes_text"
+        if col1.button("⬇️ Center (Main Flow)", use_container_width=True, key="yp_center"): _set_yes_placement("Center (Main Flow)"); st.rerun()
+        if col2.button("← Left Branch", use_container_width=True, key="yp_left"): _set_yes_placement("Left Branch"); st.rerun()
+        if col3.button("→ Right Branch", use_container_width=True, key="yp_right", type="primary"): _set_yes_placement("Right Branch"); st.rerun()
 
     elif stage == "yes_text":
-        sub_num = len(d.get("yes_steps", [])) + 1
-        pending = d.get("_yes_pending", {})
-        shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
-        col_val = pending.get("column", "left")
-        placement_disp = "Left Branch" if col_val=="left_branch" else ("Right Branch" if col_val=="right" else "Center (Main Flow)")
+        sub_num=len(d.get("yes_steps",[]))+1
+        pending=d.get("_yes_pending",{})
+        shape_name={v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"),"Process")
+        col_val=pending.get("column","left")
+        placement_disp="Left Branch" if col_val=="left_branch" else ("Right Branch" if col_val=="right" else "Center (Main Flow)")
         st.markdown(f'### ✅ YES Branch — Step {sub_num} Text')
         st.info(f'**{shape_name}** → **{placement_disp}**')
-
         with st.form("dw_yes_text"):
-            txt = st.text_input("Text inside this shape *", placeholder="e.g. Pick and pack items")
+            txt=st.text_input("Text inside this shape *", placeholder="e.g. Pick and pack items")
             if st.form_submit_button("Add this step →", use_container_width=True, type="primary"):
-                if not txt.strip():
-                    st.warning("⚠️ Enter text for this step.")
+                if not txt.strip(): st.warning("⚠️ Enter text for this step.")
                 else:
-                    pending["text"] = txt.strip()
-                    d.setdefault("yes_steps", []).append(dict(pending))
-                    d["_yes_pending"] = {}
-                    st.session_state.dw_stage = "yes_more"
-                    st.rerun()
+                    pending["text"]=txt.strip(); d.setdefault("yes_steps",[]).append(dict(pending))
+                    d["_yes_pending"]={}; st.session_state.dw_stage="yes_more"; st.rerun()
 
     elif stage == "yes_more":
-        last = d["yes_steps"][-1]["text"]
+        last=d["yes_steps"][-1]["text"]
         st.markdown("### ✅ YES Branch — Continue?")
         st.success(f'Added: **"{last}"**')
-
-        col1, col2, col3 = st.columns(3)
-        if col1.button("➕ Add another YES sub-step", use_container_width=True):
-            st.session_state.dw_stage = "yes_shape"; st.rerun()
-        if col2.button("↩️ Loop back to a previous step", use_container_width=True):
-            st.session_state.dw_stage = "yes_loop"; st.rerun()
+        col1,col2,col3=st.columns(3)
+        if col1.button("➕ Add another YES sub-step", use_container_width=True): st.session_state.dw_stage="yes_shape"; st.rerun()
+        if col2.button("↩️ Loop back to a previous step", use_container_width=True): st.session_state.dw_stage="yes_loop"; st.rerun()
         if col3.button("✅ Done with YES branch →", use_container_width=True, type="primary"):
-            st.session_state.dw_stage = "no_shape"
-            d["_branch"] = "no"; d["_sub_idx"] = 0; st.rerun()
+            st.session_state.dw_stage="no_shape"; d["_branch"]="no"; d["_sub_idx"]=0; st.rerun()
 
     elif stage == "yes_loop":
         st.markdown("### ✅ YES Branch — Loop Back")
         if not existing_step_opts:
             st.warning("No previous steps to loop back to.")
-            if st.button("Skip loop →", use_container_width=True):
-                st.session_state.dw_stage = "no_shape"; st.rerun()
+            if st.button("Skip loop →", use_container_width=True): st.session_state.dw_stage="no_shape"; st.rerun()
         else:
             with st.form("dw_yes_loop"):
-                sel = st.selectbox("Loop back to which step?", existing_step_opts)
-                lbl = st.text_input("Loop arrow label", value=d.get("yes_label","YES"))
+                sel=st.selectbox("Loop back to which step?", existing_step_opts)
+                lbl=st.text_input("Loop arrow label", value=d.get("yes_label","YES"))
                 if st.form_submit_button("Set loop →", use_container_width=True, type="primary"):
-                    try:
-                        d["yes_loop_to"]  = int(sel.split("Step ")[1].split(" :")[0])
-                        d["yes_loop_lbl"] = lbl.strip() or d.get("yes_label","YES")
-                    except Exception:
-                        pass
-                    st.session_state.dw_stage = "no_shape"; st.rerun()
+                    try: d["yes_loop_to"]=int(sel.split("Step ")[1].split(" :")[0]); d["yes_loop_lbl"]=lbl.strip() or d.get("yes_label","YES")
+                    except: pass
+                    st.session_state.dw_stage="no_shape"; st.rerun()
 
     elif stage == "no_shape":
-        sub_num = len(d.get("no_steps", [])) + 1
-        if sub_num == 1:
-            st.markdown(f'### ❌ NO Branch — Step {sub_num}')
-            st.info(f'Diamond: **"{d["diamond_text"]}"** → **{d["no_label"]}** path')
-        else:
-            st.markdown(f'### ❌ NO Branch — Sub-step {sub_num}')
-            prev = d["no_steps"][-1]["text"]
-            st.info(f'After **"{prev}"** → next NO sub-step')
-
+        sub_num=len(d.get("no_steps",[]))+1
+        st.markdown(f'### ❌ NO Branch — Step {sub_num}')
+        st.info(f'Diamond: **"{d["diamond_text"]}"** → **{d["no_label"]}** path')
         with st.form("dw_no_shape"):
-            shape_label = st.selectbox("Shape for this NO step?", list(SHAPE_NO_DIAM.keys()))
-            sub1, sub2 = st.columns(2)
-            with sub1: skip_no = st.form_submit_button("⏭ Skip NO branch entirely", use_container_width=True)
-            with sub2: go_next = st.form_submit_button("Next →", use_container_width=True, type="primary")
-
-            if skip_no:
-                st.session_state.dw_stage = "no_loop"; st.rerun()
+            shape_label=st.selectbox("Shape for this NO step?", list(SHAPE_NO_DIAM.keys()))
+            sub1,sub2=st.columns(2)
+            with sub1: skip_no=st.form_submit_button("⏭ Skip NO branch entirely", use_container_width=True)
+            with sub2: go_next=st.form_submit_button("Next →", use_container_width=True, type="primary")
+            if skip_no: st.session_state.dw_stage="no_loop"; st.rerun()
             elif go_next:
-                d.setdefault("_no_pending", {})["shape"] = SHAPE_NO_DIAM[shape_label]
-                st.session_state.dw_stage = "no_placement"; st.rerun()
+                d.setdefault("_no_pending",{})["shape"]=SHAPE_NO_DIAM[shape_label]
+                st.session_state.dw_stage="no_placement"; st.rerun()
 
     elif stage == "no_placement":
-        sub_num = len(d.get("no_steps", [])) + 1
-        pending = d.get("_no_pending", {})
-        shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
+        sub_num=len(d.get("no_steps",[]))+1
+        pending=d.get("_no_pending",{})
+        shape_name={v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"),"Process")
         st.markdown(f'### ❌ NO Branch — Step {sub_num} Placement')
         st.info(f'Shape: **{shape_name}**')
-
-        col1, col2, col3 = st.columns(3)
-
+        col1,col2,col3=st.columns(3)
         def _set_no_placement(placement):
-            col, side = placement_to_col_side(placement)
-            pending["column"]       = col
-            pending["connect_side"] = side
-            d["_no_pending"] = pending
-            st.session_state.dw_stage = "no_text"
-
-        if col1.button("⬇️ Center (Main Flow)", use_container_width=True, key="np_center", type="primary"):
-            _set_no_placement("Center (Main Flow)"); st.rerun()
-        if col2.button("← Left Branch", use_container_width=True, key="np_left"):
-            _set_no_placement("Left Branch"); st.rerun()
-        if col3.button("→ Right Branch", use_container_width=True, key="np_right"):
-            _set_no_placement("Right Branch"); st.rerun()
+            col,side=placement_to_col_side(placement)
+            pending["column"]=col; pending["connect_side"]=side; d["_no_pending"]=pending
+            st.session_state.dw_stage="no_text"
+        if col1.button("⬇️ Center (Main Flow)", use_container_width=True, key="np_center", type="primary"): _set_no_placement("Center (Main Flow)"); st.rerun()
+        if col2.button("← Left Branch", use_container_width=True, key="np_left"): _set_no_placement("Left Branch"); st.rerun()
+        if col3.button("→ Right Branch", use_container_width=True, key="np_right"): _set_no_placement("Right Branch"); st.rerun()
 
     elif stage == "no_text":
-        sub_num = len(d.get("no_steps", [])) + 1
-        pending = d.get("_no_pending", {})
-        shape_name = {v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"), "Process")
-        col_val = pending.get("column", "left")
-        placement_disp = "Left Branch" if col_val=="left_branch" else ("Right Branch" if col_val=="right" else "Center (Main Flow)")
+        sub_num=len(d.get("no_steps",[]))+1
+        pending=d.get("_no_pending",{})
+        shape_name={v:k for k,v in SHAPE_NO_DIAM.items()}.get(pending.get("shape","rect"),"Process")
+        col_val=pending.get("column","left")
+        placement_disp="Left Branch" if col_val=="left_branch" else ("Right Branch" if col_val=="right" else "Center (Main Flow)")
         st.markdown(f'### ❌ NO Branch — Step {sub_num} Text')
         st.info(f'**{shape_name}** → **{placement_disp}**')
-
         with st.form("dw_no_text"):
-            txt = st.text_input("Text inside this shape *", placeholder="e.g. Raise procurement request")
+            txt=st.text_input("Text inside this shape *", placeholder="e.g. Raise procurement request")
             if st.form_submit_button("Add this step →", use_container_width=True, type="primary"):
-                if not txt.strip():
-                    st.warning("⚠️ Enter text for this step.")
+                if not txt.strip(): st.warning("⚠️ Enter text for this step.")
                 else:
-                    pending["text"] = txt.strip()
-                    d.setdefault("no_steps", []).append(dict(pending))
-                    d["_no_pending"] = {}
-                    st.session_state.dw_stage = "no_more"; st.rerun()
+                    pending["text"]=txt.strip(); d.setdefault("no_steps",[]).append(dict(pending))
+                    d["_no_pending"]={}; st.session_state.dw_stage="no_more"; st.rerun()
 
     elif stage == "no_more":
-        last = d["no_steps"][-1]["text"]
+        last=d["no_steps"][-1]["text"]
         st.markdown("### ❌ NO Branch — Continue?")
         st.success(f'Added: **"{last}"**')
-
-        col1, col2, col3 = st.columns(3)
-        if col1.button("➕ Add another NO sub-step", use_container_width=True):
-            st.session_state.dw_stage = "no_shape"; st.rerun()
-        if col2.button("↩️ Loop back to a previous step", use_container_width=True):
-            st.session_state.dw_stage = "no_loop"; st.rerun()
-        if col3.button("✅ Done with NO branch →", use_container_width=True, type="primary"):
-            st.session_state.dw_stage = "review"; st.rerun()
+        col1,col2,col3=st.columns(3)
+        if col1.button("➕ Add another NO sub-step", use_container_width=True): st.session_state.dw_stage="no_shape"; st.rerun()
+        if col2.button("↩️ Loop back to a previous step", use_container_width=True): st.session_state.dw_stage="no_loop"; st.rerun()
+        if col3.button("✅ Done with NO branch →", use_container_width=True, type="primary"): st.session_state.dw_stage="review"; st.rerun()
 
     elif stage == "no_loop":
         st.markdown("### ❌ NO Branch — Loop Back")
         if not existing_step_opts:
             st.warning("No previous steps to loop back to.")
-            if st.button("Proceed to review →", use_container_width=True):
-                st.session_state.dw_stage = "review"; st.rerun()
+            if st.button("Proceed to review →", use_container_width=True): st.session_state.dw_stage="review"; st.rerun()
         else:
             with st.form("dw_no_loop"):
-                want_loop = st.checkbox("Loop back to a previous step?", value=False)
-                sel = st.selectbox("Loop back to which step?", existing_step_opts)
-                lbl = st.text_input("Loop arrow label", value=d.get("no_label","NO"))
+                want_loop=st.checkbox("Loop back to a previous step?", value=False)
+                sel=st.selectbox("Loop back to which step?", existing_step_opts)
+                lbl=st.text_input("Loop arrow label", value=d.get("no_label","NO"))
                 if st.form_submit_button("Next →", use_container_width=True, type="primary"):
                     if want_loop:
-                        try:
-                            d["no_loop_to"]  = int(sel.split("Step ")[1].split(" :")[0])
-                            d["no_loop_lbl"] = lbl.strip() or d.get("no_label","NO")
-                        except Exception:
-                            pass
-                    st.session_state.dw_stage = "review"; st.rerun()
+                        try: d["no_loop_to"]=int(sel.split("Step ")[1].split(" :")[0]); d["no_loop_lbl"]=lbl.strip() or d.get("no_label","NO")
+                        except: pass
+                    st.session_state.dw_stage="review"; st.rerun()
 
     elif stage == "review":
         st.markdown("### 🔍 Review Before Adding")
-
         st.markdown(f"""
-        <div style="background:#FFF9E6;border:1.5px solid #B7791F;border-radius:8px;
-             padding:12px 16px;margin-bottom:10px">
+        <div style="background:#FFF9E6;border:1.5px solid #B7791F;border-radius:8px;padding:12px 16px;margin-bottom:10px">
           <b>🔷 Diamond:</b> {d['diamond_text']}<br>
-          <span style="color:#555;font-size:12px">
-            YES label: <b>{d.get('yes_label','YES')}</b> &nbsp;|&nbsp;
-            NO label: <b>{d.get('no_label','NO')}</b>
-          </span>
-        </div>
-        """, unsafe_allow_html=True)
-
+          <span style="color:#555;font-size:12px">YES label: <b>{d.get('yes_label','YES')}</b> &nbsp;|&nbsp; NO label: <b>{d.get('no_label','NO')}</b></span>
+        </div>""", unsafe_allow_html=True)
         if d.get("yes_steps"):
             st.markdown("**✅ YES steps:**")
-            for i, s in enumerate(d["yes_steps"]):
-                col_val = s.get("column", "left")
-                placement_disp = "Left Branch" if col_val=="left_branch" else ("Right Branch" if col_val=="right" else "Center (Main Flow)")
-                st.markdown(f'- Step {i+1}: **{s["text"]}** `{s["shape"]}` → *{placement_disp}*')
-            if d.get("yes_loop_to") != "":
-                st.markdown(f'- ↩️ Loop back to **Step {d["yes_loop_to"]}**  `{d.get("yes_loop_lbl","")}`')
-        else:
-            st.markdown("✅ **YES branch:** *(no sub-steps)*")
-
+            for i,s in enumerate(d["yes_steps"]):
+                col_val=s.get("column","left")
+                pd=("Left Branch" if col_val=="left_branch" else ("Right Branch" if col_val=="right" else "Center (Main Flow)"))
+                st.markdown(f'- Step {i+1}: **{s["text"]}** `{s["shape"]}` → *{pd}*')
+            if d.get("yes_loop_to") != "": st.markdown(f'- ↩️ Loop back to **Step {d["yes_loop_to"]}** `{d.get("yes_loop_lbl","")}`')
+        else: st.markdown("✅ **YES branch:** *(no sub-steps)*")
         if d.get("no_steps"):
             st.markdown("**❌ NO steps:**")
-            for i, s in enumerate(d["no_steps"]):
-                col_val = s.get("column", "left")
-                placement_disp = "Left Branch" if col_val=="left_branch" else ("Right Branch" if col_val=="right" else "Center (Main Flow)")
-                st.markdown(f'- Step {i+1}: **{s["text"]}** `{s["shape"]}` → *{placement_disp}*')
-            if d.get("no_loop_to") != "":
-                st.markdown(f'- ↩️ Loop back to **Step {d["no_loop_to"]}**  `{d.get("no_loop_lbl","")}`')
-        else:
-            st.markdown("❌ **NO branch:** *(no sub-steps / loop only)*")
-
+            for i,s in enumerate(d["no_steps"]):
+                col_val=s.get("column","left")
+                pd=("Left Branch" if col_val=="left_branch" else ("Right Branch" if col_val=="right" else "Center (Main Flow)"))
+                st.markdown(f'- Step {i+1}: **{s["text"]}** `{s["shape"]}` → *{pd}*')
+            if d.get("no_loop_to") != "": st.markdown(f'- ↩️ Loop back to **Step {d["no_loop_to"]}** `{d.get("no_loop_lbl","")}`')
+        else: st.markdown("❌ **NO branch:** *(no sub-steps / loop only)*")
         st.markdown("---")
-        c1, c2, c3 = st.columns(3)
-        if c1.button("← Back to NO loop", use_container_width=True):
-            st.session_state.dw_stage = "no_loop"; st.rerun()
-        if c2.button("✖ Cancel & discard", use_container_width=True):
-            dw_reset(); st.rerun()
+        c1,c2,c3=st.columns(3)
+        if c1.button("← Back to NO loop", use_container_width=True): st.session_state.dw_stage="no_loop"; st.rerun()
+        if c2.button("✖ Cancel & discard", use_container_width=True): dw_reset(); st.rerun()
         if c3.button("✅ Add all steps to flowchart", use_container_width=True, type="primary"):
-            n = dw_commit()
-            dw_reset()
-            st.success(f"✅ Added {n} step(s) to the flowchart!")
-            st.rerun()
+            n=dw_commit(); dw_reset(); st.success(f"✅ Added {n} step(s) to the flowchart!"); st.rerun()
 
     return True
 
@@ -1592,24 +1444,16 @@ with tab2:
 
         else:
             if st.session_state.steps:
-                refs = "  |  ".join([
-                    f"**{i}** = {(s.get('text') or '')[:20]}"
-                    for i, s in enumerate(st.session_state.steps)
-                ])
-                st.markdown(
-                    f'<div class="step-ref-banner">📌 <b>Step index (0-based):</b> {refs}</div>',
-                    unsafe_allow_html=True)
+                refs="  |  ".join([f"**{i}** = {(s.get('text') or '')[:20]}" for i,s in enumerate(st.session_state.steps)])
+                st.markdown(f'<div class="step-ref-banner">📌 <b>Step index (0-based):</b> {refs}</div>', unsafe_allow_html=True)
 
-            existing_step_opts = [
-                f"Step {i} : {st.session_state.steps[i].get('text','')[:40]}"
-                for i in range(len(st.session_state.steps))
-            ]
+            existing_step_opts=[f"Step {i} : {st.session_state.steps[i].get('text','')[:40]}" for i in range(len(st.session_state.steps))]
 
             if st.session_state.get("dw_active"):
                 render_diamond_wizard(existing_step_opts)
             else:
-                shape_label = st.selectbox("🔷 Shape Type", list(SHAPE_TYPES.keys()), key="shape_sel")
-                is_diamond  = (shape_label == "Decision (Diamond)")
+                shape_label=st.selectbox("🔷 Shape Type", list(SHAPE_TYPES.keys()), key="shape_sel")
+                is_diamond=(shape_label=="Decision (Diamond)")
 
                 if is_diamond:
                     st.markdown("""
@@ -1621,135 +1465,88 @@ with tab2:
                         YES branch (Center, Left, or Right), NO branch (Center, Left, or Right),
                         sub-steps, and any loop-backs.
                       </span>
-                    </div>
-                    """, unsafe_allow_html=True)
-
+                    </div>""", unsafe_allow_html=True)
                     if st.button("🚀 Start Diamond Wizard", type="primary", use_container_width=True):
                         dw_start(); st.rerun()
 
                 else:
-                    CONNECT_SIDE_OPTIONS_LOCAL = ["bottom (default)", "right side →", "left side ←"]
-
+                    CONNECT_SIDE_OPTIONS_LOCAL=["bottom (default)","right side →","left side ←"]
                     with st.form("add_step_form", clear_on_submit=True):
-                        fc, ft = st.columns([2, 3])
-                        with fc:
-                            col_choice = st.selectbox("Column",
-                                ["Center (Main Flow)", "Left Branch", "Right Branch"])
-                        with ft:
-                            step_text = st.text_input("Text inside shape *",
-                                                       placeholder="e.g. Start, Check Quality…")
-
+                        fc,ft=st.columns([2,3])
+                        with fc: col_choice=st.selectbox("Column",["Center (Main Flow)","Left Branch","Right Branch"])
+                        with ft: step_text=st.text_input("Text inside shape *", placeholder="e.g. Start, Check Quality…")
                         st.markdown("**Side-column data (optional)**")
                         sc1,sc2,sc3=st.columns(3)
-                        with sc1:
-                            input_label  = st.text_input("Input Label",  key="f_il")
-                            output_label = st.text_input("Output Label", key="f_ol")
-                        with sc2:
-                            responsible = st.text_input("Responsible", key="f_re")
-                            doc_format  = st.text_input("Doc. Format",  key="f_df")
-                        with sc3:
-                            measurement = st.text_input("Measurement", key="f_me")
-
+                        with sc1: input_label=st.text_input("Input Label",key="f_il"); output_label=st.text_input("Output Label",key="f_ol")
+                        with sc2: responsible=st.text_input("Responsible",key="f_re"); doc_format=st.text_input("Doc. Format",key="f_df")
+                        with sc3: measurement=st.text_input("Measurement",key="f_me")
                         st.markdown("**Arrow / Connection**")
                         a1,a2,a3=st.columns(3)
-                        with a1:
-                            connect_from = st.text_input("Connect from step # (0-based, blank=auto)", key="f_cf")
-                            connect_side = st.selectbox("Arrow exits from", CONNECT_SIDE_OPTIONS_LOCAL, key="f_cs")
-                        with a2:
-                            arrow_label = st.text_input("Arrow label (YES/NO/blank)", key="f_al")
-                        with a3:
-                            loop_to    = st.text_input("Loop-back to step # (0-based)", key="f_lt")
-                            loop_label = st.text_input("Loop label", key="f_ll")
-
-                        submitted = st.form_submit_button("➕ Add Step", use_container_width=True, type="primary")
+                        with a1: connect_from=st.text_input("Connect from step # (0-based, blank=auto)",key="f_cf"); connect_side=st.selectbox("Arrow exits from",CONNECT_SIDE_OPTIONS_LOCAL,key="f_cs")
+                        with a2: arrow_label=st.text_input("Arrow label (YES/NO/blank)",key="f_al")
+                        with a3: loop_to=st.text_input("Loop-back to step # (0-based)",key="f_lt"); loop_label=st.text_input("Loop label",key="f_ll")
+                        submitted=st.form_submit_button("➕ Add Step", use_container_width=True, type="primary")
 
                     if submitted:
-                        if not step_text.strip():
-                            st.warning("⚠️ Please enter text for the shape.")
+                        if not step_text.strip(): st.warning("⚠️ Please enter text for the shape.")
                         else:
-                            if col_choice == "Center (Main Flow)":
-                                col_internal = "left"
-                            elif col_choice == "Left Branch":
-                                col_internal = "left_branch"
-                            else:
-                                col_internal = "right"
-                            cf_v = connect_from.strip() if connect_from.strip().isdigit() else ""
-                            lt_v = loop_to.strip()       if loop_to.strip().isdigit()      else ""
+                            col_internal="left" if col_choice=="Center (Main Flow)" else ("left_branch" if col_choice=="Left Branch" else "right")
+                            cf_v=connect_from.strip() if connect_from.strip().isdigit() else ""
+                            lt_v=loop_to.strip() if loop_to.strip().isdigit() else ""
                             st.session_state.steps.append(sanitize_step({
-                                "shape": SHAPE_TYPES[shape_label], "text": step_text.strip(),
-                                "column": col_internal,
-                                "input_label": input_label, "output_label": output_label,
-                                "responsible": responsible, "doc_format": doc_format,
-                                "measurement": measurement, "yes_label": "YES", "no_label": "NO",
-                                "connect_from": cf_v, "connect_side": connect_side,
-                                "arrow_label": arrow_label, "loop_to": lt_v, "loop_label": loop_label,
+                                "shape":SHAPE_TYPES[shape_label],"text":step_text.strip(),"column":col_internal,
+                                "input_label":input_label,"output_label":output_label,"responsible":responsible,
+                                "doc_format":doc_format,"measurement":measurement,"yes_label":"YES","no_label":"NO",
+                                "connect_from":cf_v,"connect_side":connect_side,"arrow_label":arrow_label,
+                                "loop_to":lt_v,"loop_label":loop_label,
                             }))
-                            st.success(f"✅ Step {len(st.session_state.steps)} added")
-                            st.rerun()
+                            st.success(f"✅ Step {len(st.session_state.steps)} added"); st.rerun()
 
             if not st.session_state.get("dw_active"):
                 st.divider()
-                n = len(st.session_state.steps)
+                n=len(st.session_state.steps)
                 if n:
                     st.subheader(f"Steps ({n}) — click to edit or reorder")
-                    rev_map = {v:k for k,v in SHAPE_TYPES.items()}
-                    for i, step in enumerate(st.session_state.steps):
-                        lbl = rev_map.get(step["shape"], step["shape"])
-                        col_val = step.get("column","left")
-                        col_disp = "← Left" if col_val=="left_branch" else ("→ Right" if col_val=="right" else "⬇️ Center")
-                        cf  = step.get("connect_from","")
-                        cf_d= f"step {cf}" if str(cf).isdigit() else "auto"
-                        lt  = step.get("loop_to","")
-                        lt_d= f"step {lt}" if str(lt).isdigit() else "—"
-                        with st.expander(
-                            f"**Step {i} (idx {i})** {col_disp} › [{lbl}]  {step.get('text','')}",
-                            expanded=False):
-                            nt = st.text_input("Edit text", value=(step.get("text") or ""), key=f"e_{i}")
-                            if nt != step.get("text",""): st.session_state.steps[i]["text"]=nt; st.rerun()
-
+                    rev_map={v:k for k,v in SHAPE_TYPES.items()}
+                    for i,step in enumerate(st.session_state.steps):
+                        lbl=rev_map.get(step["shape"],step["shape"])
+                        col_val=step.get("column","left")
+                        col_disp="← Left" if col_val=="left_branch" else ("→ Right" if col_val=="right" else "⬇️ Center")
+                        cf=step.get("connect_from",""); cf_d=f"step {cf}" if str(cf).isdigit() else "auto"
+                        lt=step.get("loop_to",""); lt_d=f"step {lt}" if str(lt).isdigit() else "—"
+                        with st.expander(f"**Step {i} (idx {i})** {col_disp} › [{lbl}]  {step.get('text','')}", expanded=False):
+                            nt=st.text_input("Edit text", value=(step.get("text") or ""), key=f"e_{i}")
+                            if nt!=step.get("text",""): st.session_state.steps[i]["text"]=nt; st.rerun()
                             e1,e2,e3=st.columns(3)
-                            nr = e1.text_input("Responsible", value=(step.get("responsible") or ""), key=f"r_{i}")
-                            nd = e2.text_input("Doc Format",  value=(step.get("doc_format")  or ""), key=f"d_{i}")
-                            nm = e3.text_input("Measurement", value=(step.get("measurement") or ""), key=f"m_{i}")
+                            nr=e1.text_input("Responsible",value=(step.get("responsible") or ""),key=f"r_{i}")
+                            nd=e2.text_input("Doc Format", value=(step.get("doc_format")  or ""),key=f"d_{i}")
+                            nm=e3.text_input("Measurement",value=(step.get("measurement") or ""),key=f"m_{i}")
                             if nr!=step.get("responsible",""): st.session_state.steps[i]["responsible"]=nr; st.rerun()
                             if nd!=step.get("doc_format",""):  st.session_state.steps[i]["doc_format"]=nd;  st.rerun()
                             if nm!=step.get("measurement",""): st.session_state.steps[i]["measurement"]=nm; st.rerun()
-
                             ea1,ea2,ea3=st.columns(3)
-                            n_cf   = ea1.text_input("Connect from step #", value=(step.get("connect_from") or ""), key=f"cf_{i}")
-                            n_side = ea2.selectbox("Arrow side", CONNECT_SIDE_OPTIONS,
-                                                   index=CONNECT_SIDE_OPTIONS.index(step.get("connect_side","bottom (default)"))
-                                                   if step.get("connect_side") in CONNECT_SIDE_OPTIONS else 0,
-                                                   key=f"cs_{i}")
-                            n_al   = ea3.text_input("Arrow label", value=(step.get("arrow_label") or ""), key=f"al_{i}")
+                            n_cf=ea1.text_input("Connect from step #",value=(step.get("connect_from") or ""),key=f"cf_{i}")
+                            n_side=ea2.selectbox("Arrow side",CONNECT_SIDE_OPTIONS,
+                                index=CONNECT_SIDE_OPTIONS.index(step.get("connect_side","bottom (default)")) if step.get("connect_side") in CONNECT_SIDE_OPTIONS else 0,
+                                key=f"cs_{i}")
+                            n_al=ea3.text_input("Arrow label",value=(step.get("arrow_label") or ""),key=f"al_{i}")
                             eb1,eb2=st.columns(2)
-                            n_lt   = eb1.text_input("Loop-to step #", value=(step.get("loop_to") or ""), key=f"lt_{i}")
-                            n_ll   = eb2.text_input("Loop label",     value=(step.get("loop_label") or ""), key=f"ll_{i}")
-                            for fk,fv in [("connect_from",n_cf),("connect_side",n_side),
-                                           ("arrow_label",n_al),("loop_to",n_lt),("loop_label",n_ll)]:
-                                if step.get(fk,"") != fv:
-                                    st.session_state.steps[i][fk]=fv; st.rerun()
-
-                            b1,b2,b3,_ = st.columns([1,1,1,4])
-                            if b1.button("⬆️", key=f"u_{i}"):
-                                if i>0:
-                                    st.session_state.steps[i],st.session_state.steps[i-1]=\
-                                        st.session_state.steps[i-1],st.session_state.steps[i]
+                            n_lt=eb1.text_input("Loop-to step #",value=(step.get("loop_to") or ""),key=f"lt_{i}")
+                            n_ll=eb2.text_input("Loop label",    value=(step.get("loop_label") or ""),key=f"ll_{i}")
+                            for fk,fv in [("connect_from",n_cf),("connect_side",n_side),("arrow_label",n_al),("loop_to",n_lt),("loop_label",n_ll)]:
+                                if step.get(fk,"")!=fv: st.session_state.steps[i][fk]=fv; st.rerun()
+                            b1,b2,b3,_=st.columns([1,1,1,4])
+                            if b1.button("⬆️",key=f"u_{i}"):
+                                if i>0: st.session_state.steps[i],st.session_state.steps[i-1]=st.session_state.steps[i-1],st.session_state.steps[i]
                                 st.rerun()
-                            if b2.button("⬇️", key=f"dn_{i}"):
-                                if i<len(st.session_state.steps)-1:
-                                    st.session_state.steps[i],st.session_state.steps[i+1]=\
-                                        st.session_state.steps[i+1],st.session_state.steps[i]
+                            if b2.button("⬇️",key=f"dn_{i}"):
+                                if i<len(st.session_state.steps)-1: st.session_state.steps[i],st.session_state.steps[i+1]=st.session_state.steps[i+1],st.session_state.steps[i]
                                 st.rerun()
-                            if b3.button("🗑️", key=f"del_{i}"):
+                            if b3.button("🗑️",key=f"del_{i}"):
                                 st.session_state.steps.pop(i); st.rerun()
-
-                            st.caption(
-                                f"Connect from: {cf_d}  |  Side: {step.get('connect_side','bottom')}  "
-                                f"|  Arrow: {step.get('arrow_label','—')}  |  Loop to: {lt_d}")
+                            st.caption(f"Connect from: {cf_d}  |  Side: {step.get('connect_side','bottom')}  |  Arrow: {step.get('arrow_label','—')}  |  Loop to: {lt_d}")
                 else:
-                    st.info("No steps yet. Use the form above to add process flow steps."
-                            if "Manual" in mode
+                    st.info("No steps yet. Use the form above to add process flow steps." if "Manual" in mode
                             else "Describe your process above and click ✨ Generate Flowchart with Gemini.")
 
     with preview_col:
@@ -1803,9 +1600,8 @@ with tab4:
         st.subheader("Step Summary")
         rev_map={v:k for k,v in SHAPE_TYPES.items()}
         rows=[{"Step (idx)":f"{i} (idx {i})",
-               "Col": "← Left" if s.get("column","left")=="left_branch" else ("→ Right" if s.get("column","left")=="right" else "⬇️ Center"),
-               "Shape":rev_map.get(s["shape"],s["shape"]),
-               "Text":(s.get("text") or ""),
+               "Col":"← Left" if s.get("column","left")=="left_branch" else ("→ Right" if s.get("column","left")=="right" else "⬇️ Center"),
+               "Shape":rev_map.get(s["shape"],s["shape"]),"Text":(s.get("text") or ""),
                "Connect from":s.get("connect_from","") if str(s.get("connect_from","")).isdigit() else "auto",
                "Arrow label":(s.get("arrow_label") or ""),
                "Loop to":s.get("loop_to","") if str(s.get("loop_to","")).isdigit() else "—"}
