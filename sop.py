@@ -182,13 +182,16 @@ def generate_svg_preview(steps):
     ROW_GAP  = 36
     TOP_Y    = 50
 
-    # ── FIX: arrowhead size in SVG coords ──────────────────────────────────────
-    # The arrowhead triangle: sz=5, height = sz*1.5 = 7.5px
-    # We add a 2px gap so the tip sits cleanly on the box border, not inside it.
-    AH_SZ  = 5          # must match ah() below
-    AH_H   = AH_SZ * 1.5   # = 7.5px  – actual rendered height of triangle
-    AH_GAP = 2          # small gap between tip and box edge
-    AH_OFF = AH_H + AH_GAP  # = 9.5px  – how far the LINE must stop before box_top
+    # ── Arrowhead constants ──────────────────────────────────────────────────
+    # In SVG, Y grows DOWNWARD.
+    # For a "down" arrowhead: tip at (tx, ty), body at (tx±sz, ty - AH_H)
+    # The LINE must stop at ty - AH_H (at the triangle base), NOT at ty.
+    # This way: line → triangle base → triangle tip → box edge (no overlap).
+    AH_SZ  = 5          # half-width of arrowhead base
+    AH_H   = AH_SZ * 1.5   # = 7.5px — height of arrowhead triangle
+    # The line stops AH_H pixels BEFORE the tip (at the triangle base).
+    # Add 1px gap so line doesn't poke through.
+    AH_LINE_STOP = AH_H + 1   # line ends this many px before the tip
 
     rows = []
     step_to_row = {}
@@ -259,23 +262,28 @@ def generate_svg_preview(steps):
 
     def ah(tx, ty, d="down"):
         """
-        Draw arrowhead so its TIP is at (tx, ty).
-        The triangle body extends AWAY from (tx, ty).
-        SVG Y grows downward:
-          down  → tip at ty, body at ty - AH_H  (above the tip on screen = smaller Y)
-          up    → tip at ty, body at ty + AH_H
-          right → tip at tx, body at tx - AH_H
-          left  → tip at tx, body at tx + AH_H
+        Draw arrowhead with TIP at (tx, ty). SVG Y grows DOWNWARD.
+        
+        down  → tip at bottom (ty), body ABOVE (ty - AH_H has smaller Y = higher on screen)
+        up    → tip at top (ty), body BELOW (ty + AH_H)
+        right → tip at right (tx), body to the LEFT (tx - AH_H)
+        left  → tip at left (tx), body to the RIGHT (tx + AH_H)
+        
+        The CALLING CODE must stop the line at the triangle BASE,
+        not at the tip, to avoid the line poking through the arrowhead.
         """
         sz = AH_SZ
         if d == "down":
-            # tip points downward; body is ABOVE (smaller y)
+            # tip points down; base is UP (smaller Y in SVG = higher on screen)
             return f"M{tx},{ty} L{tx-sz},{ty-AH_H} L{tx+sz},{ty-AH_H} Z"
         if d == "up":
+            # tip points up; base is DOWN (larger Y in SVG)
             return f"M{tx},{ty} L{tx-sz},{ty+AH_H} L{tx+sz},{ty+AH_H} Z"
         if d == "right":
+            # tip points right; base is to the LEFT
             return f"M{tx},{ty} L{tx-AH_H},{ty-sz} L{tx-AH_H},{ty+sz} Z"
         if d == "left":
+            # tip points left; base is to the RIGHT
             return f"M{tx},{ty} L{tx+AH_H},{ty-sz} L{tx+AH_H},{ty+sz} Z"
         return f"M{tx},{ty} L{tx-sz},{ty-AH_H} L{tx+sz},{ty-AH_H} Z"
 
@@ -298,55 +306,114 @@ def generate_svg_preview(steps):
                 s = anchors[src]
 
                 if side == "right side →":
-                    # Line exits source right-side, travels horizontally then drops into target top
+                    # Exit source RIGHT side → enter target LEFT side horizontally
+                    # Arrow tip lands on target LEFT border, pointing RIGHT
                     sx, sy = s["right"], s["cy"]
-                    ex, ey = a["cx"], a["top"]
-                    # Arrowhead tip lands exactly on ey (box top), line stops AH_OFF above
-                    arrow_svg += (
-                        f'<path d="M{sx},{sy} L{ex},{sy} L{ex},{ey+AH_OFF}" '
-                        f'fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
-                    )
-                    arrow_svg += f'<path d="{ah(ex, ey, "down")}" fill="{ac}"/>'
+                    ex, ey = a["left"], a["cy"]
 
-                elif side == "left side ←":
-                    sx, sy = s["left"], s["cy"]
-                    ex, ey = a["cx"], a["top"]
-                    arrow_svg += (
-                        f'<path d="M{sx},{sy} L{ex},{sy} L{ex},{ey+AH_OFF}" '
-                        f'fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
-                    )
-                    arrow_svg += f'<path d="{ah(ex, ey, "down")}" fill="{ac}"/>'
-
-                else:  # bottom (default) — straight or elbow going downward
-                    sx, sy = s["cx"], s["bot"]
-                    ex, ey = a["cx"], a["top"]
-                    if abs(sx - ex) < 3:
-                        # Straight vertical: line goes from sy down to (ey + AH_OFF), tip at ey
+                    if abs(sy - ey) < 3:
+                        # Same vertical level — pure horizontal line
+                        # Line stops AH_LINE_STOP before tip; tip is at ex,ey pointing right
+                        # For "right" arrow: tip at ex, base at ex - AH_H (to the left of tip)
+                        # So line must end at ex - AH_LINE_STOP
                         arrow_svg += (
-                            f'<line x1="{sx}" y1="{sy}" x2="{ex}" y2="{ey+AH_OFF}" '
+                            f'<line x1="{sx}" y1="{sy}" x2="{ex - AH_LINE_STOP}" y2="{ey}" '
                             f'stroke="{ac}" stroke-width="1.6"/>'
                         )
                     else:
-                        # Elbow: drop to midpoint, jog across, then drop to AH_OFF above target
-                        my = (sy + ey) / 2
+                        mid_y = (sy + ey) / 2
+                        # L-shaped path: right then down then right to target
+                        # Last horizontal segment stops AH_LINE_STOP before tip
                         arrow_svg += (
-                            f'<path d="M{sx},{sy} L{sx},{my} L{ex},{my} L{ex},{ey+AH_OFF}" '
+                            f'<path d="M{sx},{sy} L{sx},{mid_y} L{ex - AH_LINE_STOP},{mid_y} L{ex - AH_LINE_STOP},{ey}" '
                             f'fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
                         )
-                    arrow_svg += f'<path d="{ah(ex, ey, "down")}" fill="{ac}"/>'
+                    # Tip at target left edge, pointing right
+                    arrow_svg += f'<path d="{ah(ex, ey, "right")}" fill="{ac}"/>'
+                    if lbl:
+                        lbl_x = (sx + ex) / 2; lbl_y = sy - 3
+                        arrow_svg += f'<rect x="{lbl_x-20}" y="{lbl_y-9}" width="40" height="14" rx="3" fill="white" stroke="{ac}" stroke-width="0.7" opacity="0.93"/>'
+                        arrow_svg += f'<text x="{lbl_x}" y="{lbl_y+2}" text-anchor="middle" font-size="10" font-weight="700" fill="{ac}" font-family="\'Segoe UI\',sans-serif">{esc(lbl)}</text>'
 
-                if lbl:
-                    mx=(s["cx"]+a["cx"])/2; my=(s["bot"]+a["top"])/2-3
-                    arrow_svg += f'<rect x="{mx-20}" y="{my-9}" width="40" height="14" rx="3" fill="white" stroke="{ac}" stroke-width="0.7" opacity="0.93"/>'
-                    arrow_svg += f'<text x="{mx}" y="{my+2}" text-anchor="middle" font-size="10" font-weight="700" fill="{ac}" font-family="\'Segoe UI\',sans-serif">{esc(lbl)}</text>'
+                elif side == "left side ←":
+                    # Exit source LEFT side → enter target RIGHT side
+                    # Arrow tip lands on target RIGHT border, pointing LEFT
+                    sx, sy = s["left"], s["cy"]
+                    ex, ey = a["right"], a["cy"]
+
+                    if abs(sy - ey) < 3:
+                        # Pure horizontal; tip at ex pointing left
+                        # For "left" arrow: tip at ex, base at ex + AH_H (to the right of tip)
+                        # Line must end at ex + AH_LINE_STOP
+                        arrow_svg += (
+                            f'<line x1="{sx}" y1="{sy}" x2="{ex + AH_LINE_STOP}" y2="{ey}" '
+                            f'stroke="{ac}" stroke-width="1.6"/>'
+                        )
+                    else:
+                        mid_y = (sy + ey) / 2
+                        arrow_svg += (
+                            f'<path d="M{sx},{sy} L{sx},{mid_y} L{ex + AH_LINE_STOP},{mid_y} L{ex + AH_LINE_STOP},{ey}" '
+                            f'fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
+                        )
+                    # Tip at target right edge, pointing left
+                    arrow_svg += f'<path d="{ah(ex, ey, "left")}" fill="{ac}"/>'
+                    if lbl:
+                        lbl_x = (sx + ex) / 2; lbl_y = sy - 3
+                        arrow_svg += f'<rect x="{lbl_x-20}" y="{lbl_y-9}" width="40" height="14" rx="3" fill="white" stroke="{ac}" stroke-width="0.7" opacity="0.93"/>'
+                        arrow_svg += f'<text x="{lbl_x}" y="{lbl_y+2}" text-anchor="middle" font-size="10" font-weight="700" fill="{ac}" font-family="\'Segoe UI\',sans-serif">{esc(lbl)}</text>'
+
+                else:  # bottom (default) — downward arrow
+                    # Exit source BOTTOM → enter target TOP
+                    # Arrow tip lands on target TOP border, pointing DOWN
+                    # In SVG: Y grows downward, so target top has SMALLER y than target bottom
+                    # tip at (ex, ey=a["top"]) pointing down
+                    # For "down" arrow: tip at ey, base at ey - AH_H (ABOVE tip = smaller Y)
+                    # Line must end at ey - AH_LINE_STOP (above the arrowhead base)
+                    # BUT WAIT: source is ABOVE target, so source.bot < target.top in screen coords
+                    # but in SVG: source.bot has LARGER y than source.top,
+                    # and target.top has LARGER y than source.bot (target is lower on screen)
+                    # So: s["bot"] < a["top"] (numerically in SVG Y coords... NO)
+                    # Actually in SVG Y increases downward:
+                    #   source is visually ABOVE target => source.bot (Y) < target.top (Y)? NO.
+                    #   source is higher on screen => source has SMALLER Y values
+                    #   target.top Y value > source.bot Y value
+                    # So the line goes from s["bot"] (smaller Y, higher) to a["top"] (larger Y, lower)
+                    # The tip is at a["top"] (larger Y = lower on screen) pointing DOWN
+                    # The arrowhead base is at a["top"] - AH_H (smaller Y = just above tip)
+                    # The line must stop at a["top"] - AH_LINE_STOP
+
+                    sx, sy = s["cx"], s["bot"]
+                    ex, ey = a["cx"], a["top"]
+
+                    if abs(sx - ex) < 3:
+                        # Straight vertical down
+                        # Line from s["bot"] down to (a["top"] - AH_LINE_STOP)
+                        arrow_svg += (
+                            f'<line x1="{sx}" y1="{sy}" x2="{ex}" y2="{ey - AH_LINE_STOP}" '
+                            f'stroke="{ac}" stroke-width="1.6"/>'
+                        )
+                    else:
+                        # Elbow: drop to midpoint, jog across, then drop to AH_LINE_STOP above tip
+                        my = (sy + ey) / 2
+                        arrow_svg += (
+                            f'<path d="M{sx},{sy} L{sx},{my} L{ex},{my} L{ex},{ey - AH_LINE_STOP}" '
+                            f'fill="none" stroke="{ac}" stroke-width="1.6" stroke-linejoin="round"/>'
+                        )
+                    # Tip at target top, pointing down
+                    arrow_svg += f'<path d="{ah(ex, ey, "down")}" fill="{ac}"/>'
+                    if lbl:
+                        mx=(s["cx"]+a["cx"])/2; my=(s["bot"]+a["top"])/2-3
+                        arrow_svg += f'<rect x="{mx-20}" y="{my-9}" width="40" height="14" rx="3" fill="white" stroke="{ac}" stroke-width="0.7" opacity="0.93"/>'
+                        arrow_svg += f'<text x="{mx}" y="{my+2}" text-anchor="middle" font-size="10" font-weight="700" fill="{ac}" font-family="\'Segoe UI\',sans-serif">{esc(lbl)}</text>'
         else:
             if idx > 0:
                 prev = next((pi for pi in range(idx-1,-1,-1) if anchors[pi]["col"]==a["col"]),None)
                 if prev is not None:
                     ps = anchors[prev]
-                    # Auto-connect: straight down, line stops AH_OFF above target top
+                    # Auto-connect: straight down
+                    # Line stops AH_LINE_STOP before tip; tip at a["top"] pointing down
                     arrow_svg += (
-                        f'<line x1="{a["cx"]}" y1="{ps["bot"]}" x2="{a["cx"]}" y2="{a["top"]+AH_OFF}" '
+                        f'<line x1="{a["cx"]}" y1="{ps["bot"]}" x2="{a["cx"]}" y2="{a["top"] - AH_LINE_STOP}" '
                         f'stroke="{ARROW}" stroke-width="1.6"/>'
                     )
                     arrow_svg += f'<path d="{ah(a["cx"], a["top"], "down")}" fill="{ARROW}"/>'
@@ -355,7 +422,20 @@ def generate_svg_preview(steps):
             dest = anchors[int(lt)]
             lc = YES_C if ll.upper()=="YES" else (NO_C if ll.upper()=="NO" else "#1a6dcc")
             lx = a["left"] - 24
-            arrow_svg += f'<path d="M{a["left"]},{a["cy"]} L{lx},{a["cy"]} L{lx},{dest["cy"]} L{dest["left"]+AH_OFF},{dest["cy"]}" fill="none" stroke="{lc}" stroke-width="1.6" stroke-dasharray="5 3" stroke-linejoin="round"/>'
+            # Loop-back: goes left from current box, up to destination row, then right into destination left side
+            # Tip points right, landing on dest["left"]
+            # Line must stop AH_LINE_STOP before dest["left"] (i.e. dest["left"] - AH_LINE_STOP... 
+            # but "right" arrowhead: tip at dest["left"], base at dest["left"] - AH_H (to the left)
+            # No wait: for "right" pointing arrow entering from LEFT side:
+            # tip at dest["left"] going right INTO the box; base is to the LEFT of tip
+            # So line from (lx, dest["cy"]) going RIGHT to (dest["left"] - AH_LINE_STOP)
+            # Hmm but lx is to the LEFT of dest["left"], so we go right toward dest["left"]
+            # Line stops at dest["left"] - AH_LINE_STOP, tip at dest["left"]
+            # Actually for loop arrows entering from the LEFT:
+            # we come from the LEFT side and the tip points RIGHT into the box
+            # "right" ah: tip at tx, base at tx - AH_H (to the left of tip)
+            # So line ends at dest["left"] - AH_LINE_STOP ✓
+            arrow_svg += f'<path d="M{a["left"]},{a["cy"]} L{lx},{a["cy"]} L{lx},{dest["cy"]} L{dest["left"] - AH_LINE_STOP},{dest["cy"]}" fill="none" stroke="{lc}" stroke-width="1.6" stroke-dasharray="5 3" stroke-linejoin="round"/>'
             arrow_svg += f'<path d="{ah(dest["left"], dest["cy"], "right")}" fill="{lc}"/>'
             if ll:
                 my=(a["cy"]+dest["cy"])/2
@@ -501,40 +581,46 @@ def draw_ltext(c, text, x, cy, max_w, fn="Helvetica", fs=10, col=colors.black):
         c.drawString(x, y0 - i * lh, ln)
 
 # ── PDF arrowhead constants ───────────────────────────────────────────────────
-# sz=2.5 → triangle legs = sz*1.5 = 3.75mm; add 0.5mm gap so tip sits on border
+# ReportLab Y grows UPWARD (opposite of SVG).
+# sz=2.5mm → triangle legs = sz*1.5 = 3.75mm
+# Line must stop at triangle BASE (not tip) to avoid overlapping the box.
 PDF_AH_SZ  = 2.5
-PDF_AH_LEG = PDF_AH_SZ * 1.5   # 3.75
-PDF_AH_GAP = 0.5               # gap in mm (ReportLab uses mm when multiplied by mm unit)
-PDF_AH_OFF = (PDF_AH_LEG + PDF_AH_GAP) * mm  # total offset in points
+PDF_AH_LEG = PDF_AH_SZ * 1.5   # 3.75mm
+PDF_AH_GAP = 0.5               # extra gap mm
+PDF_AH_LINE_STOP = (PDF_AH_LEG + PDF_AH_GAP) * mm  # line stops this far from tip
 
 def arrow_head(c, tx, ty, d="down"):
     """
-    Draw arrowhead with TIP at (tx, ty).
-    Body extends AWAY from tip direction.
-    ReportLab Y grows UPWARD, so:
-      down  → tip at ty, body at ty + PDF_AH_LEG  (higher Y = higher on page)
-      up    → tip at ty, body at ty - PDF_AH_LEG
-      right → tip at tx, body at tx - PDF_AH_LEG
-      left  → tip at tx, body at tx + PDF_AH_LEG
+    Draw arrowhead with TIP at (tx, ty). ReportLab Y grows UPWARD.
+    
+    down  → tip points down (lower Y); body ABOVE tip (ty + PDF_AH_LEG)
+    up    → tip points up (higher Y);  body BELOW tip (ty - PDF_AH_LEG)
+    right → tip points right;          body LEFT of tip (tx - PDF_AH_LEG)
+    left  → tip points left;           body RIGHT of tip (tx + PDF_AH_LEG)
+    
+    Calling code must stop the line at the triangle BASE to avoid overlap.
     """
     sz = PDF_AH_SZ
     leg = PDF_AH_LEG
     c.setFillColor(colors.black)
     p = c.beginPath()
     if d == "down":
-        # tip points downward (lower on page = lower Y in ReportLab)
+        # In ReportLab: down = lower Y. Tip at ty (low), base ABOVE (ty + leg)
         p.moveTo(tx, ty)
         p.lineTo(tx - sz, ty + leg)
         p.lineTo(tx + sz, ty + leg)
     elif d == "up":
+        # Tip at ty (high), base BELOW (ty - leg)
         p.moveTo(tx, ty)
         p.lineTo(tx - sz, ty - leg)
         p.lineTo(tx + sz, ty - leg)
     elif d == "right":
+        # Tip at tx (right), base LEFT (tx - leg)
         p.moveTo(tx, ty)
         p.lineTo(tx - leg, ty + sz)
         p.lineTo(tx - leg, ty - sz)
     elif d == "left":
+        # Tip at tx (left), base RIGHT (tx + leg)
         p.moveTo(tx, ty)
         p.lineTo(tx + leg, ty + sz)
         p.lineTo(tx + leg, ty - sz)
@@ -544,37 +630,36 @@ def arrow_head(c, tx, ty, d="down"):
 def pdf_arrow_down(c, x, y_src_bot, y_tgt_top, col=colors.black):
     """
     Draw a vertical downward arrow in PDF coordinates (Y grows upward).
-    y_src_bot : bottom edge of source shape  (lower Y value = lower on page)
-    y_tgt_top : top edge of target shape     (higher Y value = higher on page)
-    Arrow travels from y_src_bot DOWN to y_tgt_top (i.e. from higher Y to lower Y).
-    The line must stop PDF_AH_OFF ABOVE the tip so the triangle doesn't overlap the box.
-    Tip lands exactly at y_tgt_top.
+    y_src_bot : bottom edge of source shape (higher Y = higher on page)
+    y_tgt_top : top edge of target shape   (lower Y = lower on page, visually below source)
+    
+    Arrow travels from y_src_bot DOWN to y_tgt_top.
+    In ReportLab: "down on page" = decreasing Y.
+    Tip lands at y_tgt_top pointing DOWN (d="down").
+    For "down" arrowhead: tip at ty, base at ty + PDF_AH_LEG (above tip in ReportLab).
+    Line must stop at y_tgt_top + PDF_AH_LINE_STOP (i.e. at triangle base, above the tip).
     """
     c.setStrokeColor(col)
     c.setLineWidth(0.7)
-    # Line goes from source bottom down; stops PDF_AH_OFF above the target top
-    # "above tip" in ReportLab = y_tgt_top + PDF_AH_OFF  (higher Y on page)
-    c.line(x, y_src_bot, x, y_tgt_top + PDF_AH_OFF)
+    # Line goes from source bottom DOWN; stops at triangle base ABOVE tip
+    # In ReportLab going "down" = decreasing Y
+    # Triangle base is ABOVE tip = y_tgt_top + PDF_AH_LEG (higher Y = higher on page)
+    # So line runs from y_src_bot (high Y) down to y_tgt_top + PDF_AH_LINE_STOP (lower Y but still above tip)
+    c.line(x, y_src_bot, x, y_tgt_top + PDF_AH_LINE_STOP)
     arrow_head(c, x, y_tgt_top, "down")
     c.setStrokeColor(colors.black)
 
 def pdf_elbow(c, sx, sy, ex, ey, col=colors.black, lbl="", lbl_col=colors.black):
     """
-    Elbow connector. All coords in ReportLab points (Y grows upward).
-    sx,sy = exit point on source shape (e.g. right/left/bottom of source)
-    ex,ey = TOP edge of target shape (arrow tip will land here)
-
-    Since the arrow always enters the target from ABOVE (visually), and
-    ReportLab Y grows upward, ey < sy means the target is VISUALLY BELOW the source.
-    The line stops PDF_AH_OFF above ey (i.e. at ey + PDF_AH_OFF).
+    Elbow connector in ReportLab (Y grows upward).
+    Arrow always enters target from ABOVE (visually), so tip points DOWN.
+    ey = top edge of target shape (lower Y in ReportLab than source).
+    Line's final segment must stop at ey + PDF_AH_LINE_STOP (above the tip).
     """
     c.setStrokeColor(col)
     c.setLineWidth(0.7)
-    # Horizontal segment from source exit to target x
     c.line(sx, sy, ex, sy)
-    # Vertical segment dropping down to PDF_AH_OFF above target top
-    c.line(ex, sy, ex, ey + PDF_AH_OFF)
-    # Arrowhead tip at target top
+    c.line(ex, sy, ex, ey + PDF_AH_LINE_STOP)
     arrow_head(c, ex, ey, "down")
     if lbl:
         c.setFont("Helvetica-Bold", 9)
@@ -831,22 +916,17 @@ def generate_pdf(steps, meta):
             if 0<=src<len(anchors):
                 s=anchors[src]
                 if side=="right side →":
-                    # Exit source right side, enter target top
                     pdf_elbow(c, s["right"], s["cy"], a["cx"], a["top"], col=ac, lbl=lbl, lbl_col=ac)
                 elif side=="left side ←":
-                    # Exit source left side, enter target top
                     pdf_elbow(c, s["left"], s["cy"], a["cx"], a["top"], col=ac, lbl=lbl, lbl_col=ac)
                 else:
-                    # Bottom exit
                     if abs(s["cx"]-a["cx"])<2:
-                        # Straight vertical arrow
                         pdf_arrow_down(c, a["cx"], s["bot"], a["top"], col=ac)
                         if lbl:
                             c.setFont("Helvetica-Bold",9); c.setFillColor(ac)
                             c.drawCentredString(a["cx"]+5, (s["bot"]+a["top"])/2, lbl)
                             c.setFillColor(colors.black)
                     else:
-                        # Elbow: source bottom → target top (via midpoint)
                         pdf_elbow(c, s["cx"], s["bot"], a["cx"], a["top"], col=ac, lbl=lbl, lbl_col=ac)
         else:
             if idx>0:
@@ -862,8 +942,17 @@ def generate_pdf(steps, meta):
             c.setStrokeColor(lc); c.setLineWidth(0.7)
             c.line(a["sh_x"], a["cy"], margin, a["cy"])
             c.line(margin, a["cy"], margin, dest["cy"])
-            # Line stops PDF_AH_OFF to the RIGHT of destination left edge
-            c.line(margin, dest["cy"], dest["left"] + PDF_AH_OFF, dest["cy"])
+            # Line stops PDF_AH_LINE_STOP before dest left edge; tip points right into box
+            # "right" arrowhead: tip at dest["left"], base LEFT of tip = dest["left"] - PDF_AH_LEG*mm
+            # Line ends at dest["left"] - PDF_AH_LINE_STOP... 
+            # but we're coming FROM the left going RIGHT, so line ends BEFORE (to the left of) the tip
+            # dest["left"] - PDF_AH_LINE_STOP would be further left than tip? No wait:
+            # We're at margin (some x value to the LEFT of dest["left"])
+            # Going RIGHT toward dest["left"]
+            # Arrowhead "right": tip at dest["left"] (rightmost point), base at dest["left"] - PDF_AH_LEG (left of tip)
+            # Line must end at dest["left"] - PDF_AH_LINE_STOP (at/before triangle base)
+            # Since PDF_AH_LINE_STOP = (PDF_AH_LEG + PDF_AH_GAP)*mm, the line stops JUST LEFT of triangle base
+            c.line(margin, dest["cy"], dest["left"] - PDF_AH_LINE_STOP, dest["cy"])
             arrow_head(c, dest["left"], dest["cy"], "right")
             if ll:
                 c.setFont("Helvetica-Bold",8); c.setFillColor(lc)
