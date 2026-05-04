@@ -187,11 +187,11 @@ def generate_svg_preview(steps):
     # For a "down" arrowhead: tip at (tx, ty), body at (tx±sz, ty - AH_H)
     # The LINE must stop at ty - AH_H (at the triangle base), NOT at ty.
     # This way: line → triangle base → triangle tip → box edge (no overlap).
-    AH_SZ  = 5          # half-width of arrowhead base
-    AH_H   = AH_SZ * 1.5   # = 7.5px — height of arrowhead triangle
-    # The line stops AH_H pixels BEFORE the tip (at the triangle base).
-    # Add 1px gap so line doesn't poke through.
-    AH_LINE_STOP = AH_H + 1   # line ends this many px before the tip
+    AH_SZ  = 4          # half-width of arrowhead base
+    AH_H   = AH_SZ * 1.8   # = 7.2px — height of arrowhead triangle
+    # The line must stop at the triangle BASE (AH_H before the tip).
+    # We add an extra 2px gap so the line end doesn't bleed into the triangle.
+    AH_LINE_STOP = AH_H + 2   # = 9.2px — line ends this far before the tip
 
     rows = []
     step_to_row = {}
@@ -273,19 +273,16 @@ def generate_svg_preview(steps):
         not at the tip, to avoid the line poking through the arrowhead.
         """
         sz = AH_SZ
+        h  = AH_H
         if d == "down":
-            # tip points down; base is UP (smaller Y in SVG = higher on screen)
-            return f"M{tx},{ty} L{tx-sz},{ty-AH_H} L{tx+sz},{ty-AH_H} Z"
+            return f"M{tx},{ty} L{tx-sz},{ty-h} L{tx+sz},{ty-h} Z"
         if d == "up":
-            # tip points up; base is DOWN (larger Y in SVG)
-            return f"M{tx},{ty} L{tx-sz},{ty+AH_H} L{tx+sz},{ty+AH_H} Z"
+            return f"M{tx},{ty} L{tx-sz},{ty+h} L{tx+sz},{ty+h} Z"
         if d == "right":
-            # tip points right; base is to the LEFT
-            return f"M{tx},{ty} L{tx-AH_H},{ty-sz} L{tx-AH_H},{ty+sz} Z"
+            return f"M{tx},{ty} L{tx-h},{ty-sz} L{tx-h},{ty+sz} Z"
         if d == "left":
-            # tip points left; base is to the RIGHT
-            return f"M{tx},{ty} L{tx+AH_H},{ty-sz} L{tx+AH_H},{ty+sz} Z"
-        return f"M{tx},{ty} L{tx-sz},{ty-AH_H} L{tx+sz},{ty-AH_H} Z"
+            return f"M{tx},{ty} L{tx+h},{ty-sz} L{tx+h},{ty+sz} Z"
+        return f"M{tx},{ty} L{tx-sz},{ty-h} L{tx+sz},{ty-h} Z"
 
     ARROW = "#4a5568"; YES_C = "#276749"; NO_C = "#c53030"
     arrow_svg = ""
@@ -584,9 +581,9 @@ def draw_ltext(c, text, x, cy, max_w, fn="Helvetica", fs=10, col=colors.black):
 # ReportLab Y grows UPWARD (opposite of SVG).
 # sz=2.5mm → triangle legs = sz*1.5 = 3.75mm
 # Line must stop at triangle BASE (not tip) to avoid overlapping the box.
-PDF_AH_SZ  = 2.5
-PDF_AH_LEG = PDF_AH_SZ * 1.5   # 3.75mm
-PDF_AH_GAP = 0.5               # extra gap mm
+PDF_AH_SZ  = 2.0
+PDF_AH_LEG = PDF_AH_SZ * 1.8   # 3.6mm
+PDF_AH_GAP = 1.0               # extra gap mm — increased to avoid overlap
 PDF_AH_LINE_STOP = (PDF_AH_LEG + PDF_AH_GAP) * mm  # line stops this far from tip
 
 def arrow_head(c, tx, ty, d="down"):
