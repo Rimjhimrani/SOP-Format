@@ -75,6 +75,15 @@ COLUMN_OPTIONS = ["left", "right"]
 CONNECT_SIDE_OPTIONS = ["bottom (default)", "right side →", "left side ←"]
 PLACEMENT_OPTIONS = ["Center (Main Flow)", "Left Branch", "Right Branch"]
 
+# ─── PDF Shape Heights (in ReportLab points) ──────────────────────────────────
+SH_H_PDF = {
+    "rect":          13 * mm,
+    "oval":          10 * mm,
+    "parallelogram": 13 * mm,
+    "diamond":       20 * mm,
+    "arrow_text":     6 * mm,
+}
+
 def placement_to_col_side(placement):
     if placement == "Center (Main Flow)":
         return "left", "bottom (default)"
@@ -449,7 +458,7 @@ function zoom(d){{s=Math.max(0.3,Math.min(3,s+d));document.getElementById('si').
 function resetZoom(){{s=1;document.getElementById('si').style.transform='scale(1)';document.getElementById('zl').textContent='100%';}}
 </script></body></html>"""
 
-# ─── PDF Generation (A3 Landscape, fully contained flow) ──────────────────────
+# ─── PDF Generation (A3 Landscape) ───────────────────────────────────────────
 def wrapped_lines_pdf(c, text, max_w, fn, fs):
     words=str(text).split(); lines=[]; cur=""
     for w in words:
@@ -499,17 +508,15 @@ def arrow_head_pdf(c, tx, ty, d="down"):
         p.moveTo(tx,ty); p.lineTo(tx+leg, ty+sz); p.lineTo(tx+leg, ty-sz)
     p.close(); c.drawPath(p, fill=1, stroke=0)
 
-AH_STOP = (PDF_AH_LEG + PDF_AH_GAP) * mm   # gap to stop line before tip
+AH_STOP = (PDF_AH_LEG + PDF_AH_GAP) * mm
 
 def pdf_line_down(c, x, y_top_src, y_top_tgt, col=colors.black):
-    """Straight vertical arrow downward. src bot → tgt top."""
     c.setStrokeColor(col); c.setLineWidth(0.6)
     c.line(x, y_top_src, x, y_top_tgt + AH_STOP)
     arrow_head_pdf(c, x, y_top_tgt, "down")
     c.setStrokeColor(colors.black)
 
 def pdf_elbow_down(c, sx, sy_bot, ex, ey_top, col=colors.black, lbl="", lbl_col=colors.black):
-    """L-elbow: go down from (sx,sy_bot), jog horizontally, arrive at (ex,ey_top) from above."""
     mid_y = (sy_bot + ey_top) / 2
     c.setStrokeColor(col); c.setLineWidth(0.6)
     c.line(sx, sy_bot, sx, mid_y)
@@ -523,7 +530,6 @@ def pdf_elbow_down(c, sx, sy_bot, ex, ey_top, col=colors.black, lbl="", lbl_col=
 
 def pdf_arrow_horiz(c, x_from, x_to, y, direction="right",
                     col=colors.black, lbl="", lbl_col=colors.black):
-    """Horizontal arrow. direction = 'right' or 'left'."""
     c.setStrokeColor(col); c.setLineWidth(0.6)
     if direction == "right":
         c.line(x_from, y, x_to - AH_STOP, y)
@@ -539,7 +545,6 @@ def pdf_arrow_horiz(c, x_from, x_to, y, direction="right",
 
 def pdf_horiz_then_down(c, x_from, y_from, x_to, y_to,
                         col=colors.black, lbl="", lbl_col=colors.black):
-    """Exit horizontally then go down to target top."""
     c.setStrokeColor(col); c.setLineWidth(0.6)
     c.line(x_from, y_from, x_to, y_from)
     c.line(x_to, y_from, x_to, y_to + AH_STOP)
@@ -578,37 +583,33 @@ def draw_para_pdf(c, x, y, w, h, text, fs=8):
 
 def generate_pdf(steps, meta):
     buf = io.BytesIO()
-    # ── A3 Landscape ──────────────────────────────────────────────────────────
-    PW, PH = landscape(A3)   # 420mm × 297mm  →  pts: ~1190 × 842
+    PW, PH = landscape(A3)
     c = canvas.Canvas(buf, pagesize=(PW, PH))
 
     ML = 8*mm; MR = 8*mm; MT = 8*mm
     TW = PW - ML - MR
 
-    # ── Pre-calculate all fixed section heights so flow gets exact remainder ──
     HDR_H   = 28*mm
     PS_H    = 9*mm
     BNR_H   = 7*mm
     HDR2_H  = 9*mm
-    CR_TH   = 7*mm    # change record title bar
-    CR_HH   = 8*mm    # change record header row
-    CR_RH   = 6.5*mm  # change record data row height
-    N_CR_DATA_ROWS = len(meta.get("change_records", [])) + 2   # data + 2 blanks
+    CR_TH   = 7*mm
+    CR_HH   = 8*mm
+    CR_RH   = 6.5*mm
+    N_CR_DATA_ROWS = len(meta.get("change_records", [])) + 2
     FOOTER_H = 5*mm
-    GAP1     = 1.5*mm  # gap after header
-    GAP2     = 1.5*mm  # gap after purpose row
-    GAP3     = 2.5*mm  # gap before change record
+    GAP1     = 1.5*mm
+    GAP2     = 1.5*mm
+    GAP3     = 2.5*mm
 
     FIXED_H = (HDR_H + GAP1 + PS_H + GAP2 + BNR_H + HDR2_H
                + GAP3 + CR_TH + CR_HH + N_CR_DATA_ROWS*CR_RH + FOOTER_H + 2*MT)
 
-    FLOW_AVAIL = PH - FIXED_H   # exact pixels available for the flow table rows
+    FLOW_AVAIL = PH - FIXED_H
 
-    cur_y = PH - MT   # start drawing from top
+    cur_y = PH - MT
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 1 — TOP HEADER
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── SECTION 1: TOP HEADER ─────────────────────────────────────────────────
     LOGO_W = 50*mm
     TITLE_W= 100*mm
     META_W = TW - LOGO_W - TITLE_W
@@ -621,7 +622,6 @@ def generate_pdf(steps, meta):
     c.line(ML+LOGO_W, hdr_bot, ML+LOGO_W, hdr_top)
     c.line(ML+LOGO_W+TITLE_W, hdr_bot, ML+LOGO_W+TITLE_W, hdr_top)
 
-    # Logo block
     if meta.get("logo_bytes"):
         try:
             logo_img = ImageReader(io.BytesIO(meta["logo_bytes"]))
@@ -635,7 +635,6 @@ def generate_pdf(steps, meta):
         c.setFont("Helvetica-Bold",10); c.setFillColor(colors.black)
         c.drawString(ML+4, (hdr_top+hdr_bot)/2+2, meta["company_name"])
 
-    # Title block
     title_cx = ML + LOGO_W + TITLE_W/2
     c.setFont("Helvetica-Bold", 13); c.setFillColor(colors.black)
     c.drawCentredString(title_cx, hdr_top - 10, "STANDARD OPERATING PROCEDURE")
@@ -644,7 +643,6 @@ def generate_pdf(steps, meta):
     for i, ln in enumerate(sub_lines):
         c.drawCentredString(title_cx, hdr_top - 22 - i*12, ln)
 
-    # Meta grid (4 rows)
     RX = ML + LOGO_W + TITLE_W
     rh = HDR_H / 4
     c1w=22*mm; c2w=36*mm; c3w=16*mm; c4w=META_W-c1w-c2w-c3w
@@ -666,9 +664,7 @@ def generate_pdf(steps, meta):
                        "Helvetica-Bold" if is_lbl else "Helvetica", 8)
     cur_y = hdr_bot - GAP1
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 2 — PURPOSE / SCOPE ROW
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── SECTION 2: PURPOSE / SCOPE ────────────────────────────────────────────
     PL_W = 20*mm; PV_W = 80*mm; SL_W = 16*mm; SV_W = TW-PL_W-PV_W-SL_W
     c.setLineWidth(0.5)
     for x,w,txt,is_lbl in [(ML,PL_W,"Purpose",True),(ML+PL_W,PV_W,meta["purpose"],False),
@@ -682,9 +678,7 @@ def generate_pdf(steps, meta):
             draw_ltext(c, txt, x+3, cur_y-PS_H/2, w-5, fs=8)
     cur_y -= PS_H + GAP2
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 3 — PROCESS STEPS BANNER + COLUMN HEADERS
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── SECTION 3: PROCESS BANNER + COLUMN HEADERS ───────────────────────────
     COL_IN   = 18*mm
     COL_OUT  = 18*mm
     COL_RESP = 22*mm
@@ -700,7 +694,6 @@ def generate_pdf(steps, meta):
           ML+COL_IN+COL_FLOW+COL_OUT+COL_RESP+COL_DOC,
           ML+TW]
 
-    # Banner
     c.setFillColor(colors.HexColor("#BDD7EE"))
     c.rect(ML, cur_y-BNR_H, TW, BNR_H, fill=1, stroke=1); c.setFillColor(colors.black)
     c.setFont("Helvetica-Bold", 9)
@@ -708,7 +701,6 @@ def generate_pdf(steps, meta):
     c.drawString(XS[2]+3, cur_y-BNR_H/2-3, f"OWNER :  {meta['owner']}")
     cur_y -= BNR_H
 
-    # Column headers
     hdr_labels = ["Input","Process Flow","Output","Responsible","Doc. Format /\nSystem","Effective\nMeasurement"]
     for i,label in enumerate(hdr_labels):
         cw = XS[i+1]-XS[i]
@@ -722,13 +714,10 @@ def generate_pdf(steps, meta):
             c.drawCentredString(XS[i]+cw/2, y0-li*lh, ln)
     cur_y -= HDR2_H
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 4 — FLOW TABLE DATA ROWS  (auto-scaled to fit FLOW_AVAIL)
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── SECTION 4: FLOW TABLE DATA ROWS ──────────────────────────────────────
     has_left_br = any(s.get("column","left")=="left_branch" for s in steps)
     has_right   = any(s.get("column","left")=="right"       for s in steps)
 
-    # Sub-column proportions inside COL_FLOW
     if has_left_br and has_right:
         SUB_LB_W = COL_FLOW * 0.25
         SUB_C_W  = COL_FLOW * 0.50
@@ -758,7 +747,7 @@ def generate_pdf(steps, meta):
         if col=="right":       return R_CX  or C_CX
         return C_CX
 
-    # ── Build rows first (packing logic) ─────────────────────────────────────
+    # Build rows
     rows = []; step_to_row = {}
     for idx, step in enumerate(steps):
         col = step.get("column","left")
@@ -782,12 +771,10 @@ def generate_pdf(steps, meta):
             rows.append({"left_branch":None,"left":idx,"right":None})
             step_to_row[idx] = len(rows)-1
 
-    # ── Determine base shape heights, then scale to fit FLOW_AVAIL exactly ───
-    # Base ratios (diamond taller, arrow_text shorter)
+    # Scale row heights to fit FLOW_AVAIL exactly
     BASE_SH = {"rect":1.0, "oval":0.77, "parallelogram":1.0, "diamond":1.54, "arrow_text":0.46}
-    V_PAD_RATIO = 0.27   # V_PAD = V_PAD_RATIO * UNIT
+    V_PAD_RATIO = 0.27
 
-    # Total height = sum over rows of: max_shape_ratio * UNIT + 2 * V_PAD_RATIO * UNIT
     row_ratios = []
     for row in rows:
         hl  = BASE_SH.get(steps[row["left"]]["shape"],         1.0) if row.get("left")         is not None else 0
@@ -796,15 +783,22 @@ def generate_pdf(steps, meta):
         row_ratios.append(max(hl, hr, hlb) + 2 * V_PAD_RATIO)
 
     total_ratio = sum(row_ratios)
-    # UNIT = height of one "standard rect" row including padding
     UNIT = FLOW_AVAIL / total_ratio if total_ratio > 0 else 10*mm
-    # Clamp UNIT so shapes don't get absurdly large on short flows
     UNIT = min(UNIT, 18*mm)
 
-    def sh_h(shape):
-        return BASE_SH.get(shape, 1.0) * UNIT
-
     V_PAD = V_PAD_RATIO * UNIT
+
+    # ── SH_H_PDF: actual PDF height per shape (fixed mm values) ──────────────
+    # This dict maps shape names → point heights used when building anchors.
+    # It is intentionally separate from the scaled UNIT-based logic so that
+    # shapes have a sensible minimum physical size regardless of flow length.
+    SHAPE_PDF_HEIGHTS = {
+        "rect":          13 * mm,
+        "oval":          10 * mm,
+        "parallelogram": 13 * mm,
+        "diamond":       20 * mm,
+        "arrow_text":     6 * mm,
+    }
 
     def _sw(col):
         if col == "left_branch": sub = SUB_LB_W
@@ -812,7 +806,7 @@ def generate_pdf(steps, meta):
         else:                    sub = SUB_C_W
         return max(sub * 0.82, 15*mm)
 
-    # ── Compute row Y positions using scaled UNIT ─────────────────────────────
+    # Compute row Y positions
     TABLE_TOP = cur_y
     row_geom = []; sy2 = TABLE_TOP
     for row, ratio in zip(rows, row_ratios):
@@ -823,18 +817,16 @@ def generate_pdf(steps, meta):
     TABLE_BOTTOM = sy2
     TBL_H = TABLE_TOP - TABLE_BOTTOM
 
-    # Draw table background + outer border
+    # Draw table background + border
     c.setFillColor(colors.white)
     c.rect(ML, TABLE_BOTTOM, TW, TBL_H, fill=1, stroke=0)
     c.setStrokeColor(colors.black); c.setLineWidth(0.7)
     c.rect(ML, TABLE_BOTTOM, TW, TBL_H, fill=0, stroke=1)
 
-    # Vertical dividers (outer columns)
     c.setLineWidth(0.45)
     for x in XS[1:-1]:
         c.line(x, TABLE_BOTTOM, x, TABLE_TOP)
 
-    # Light dividers between sub-columns inside flow cell
     c.setStrokeColor(colors.HexColor("#AAAAAA")); c.setLineWidth(0.2)
     if has_left_br:
         dx = FLOW_L + SUB_LB_W; c.line(dx, TABLE_BOTTOM, dx, TABLE_TOP)
@@ -842,33 +834,30 @@ def generate_pdf(steps, meta):
         dx = FLOW_L + SUB_LB_W + SUB_C_W; c.line(dx, TABLE_BOTTOM, dx, TABLE_TOP)
     c.setStrokeColor(colors.black)
 
-    # Horizontal row dividers (side columns only — keeps flow area clean)
     c.setLineWidth(0.25)
     for ri, rg in enumerate(row_geom[:-1]):
         y = rg["ry"]
-        # Input column
         c.line(XS[0], y, XS[1], y)
-        # Output + right columns
         c.line(XS[2], y, XS[-1], y)
 
-    # Build shape anchors
+    # Build shape anchors using SHAPE_PDF_HEIGHTS (fixes the NameError)
     anchors = {}
     for idx, step in enumerate(steps):
         ri  = step_to_row[idx]; rg = row_geom[ri]
         ry  = rg["ry"]; ROW_H = rg["ROW_H"]
         col = step.get("column","left")
-        sh_h = SH_H_PDF.get(step["shape"], 13*mm)
-        cx   = _cx(col)
-        sw   = _sw(col)
-        sh_x = cx - sw/2
-        sh_bot = ry + (ROW_H - sh_h)/2
-        sh_top = sh_bot + sh_h
-        sh_mid = sh_bot + sh_h/2
+        shape_h = SHAPE_PDF_HEIGHTS.get(step["shape"], 13*mm)   # ← was SH_H_PDF (undefined)
+        cx      = _cx(col)
+        sw      = _sw(col)
+        sh_x    = cx - sw/2
+        sh_bot  = ry + (ROW_H - shape_h)/2
+        sh_top  = sh_bot + shape_h
+        sh_mid  = sh_bot + shape_h/2
         anchors[idx] = {
             "cx": cx, "cy": sh_mid,
             "top": sh_top, "bot": sh_bot,
             "left": sh_x, "right": sh_x+sw,
-            "sh_x": sh_x, "sh_w": sw, "sh_h": sh_h,
+            "sh_x": sh_x, "sh_w": sw, "sh_h": shape_h,
             "col": col,
             "row_left":  FLOW_L,
             "row_right": FLOW_R,
@@ -910,14 +899,11 @@ def generate_pdf(steps, meta):
                 s = anchors[src]
 
                 if side == "right side →":
-                    # Exit right side of source, enter left side of target
                     x_from = s["right"]; x_to = a["left"]
                     y      = s["cy"]
-                    # If same Y level → pure horizontal
                     if abs(s["cy"] - a["cy"]) < 1*mm:
                         pdf_arrow_horiz(c, x_from, x_to, y, "right", ac, lbl, ac)
                     else:
-                        # Elbow: horizontal then down (or up)
                         pdf_horiz_then_down(c, x_from, s["cy"], x_to, a["top"], ac, lbl, ac)
 
                 elif side == "left side ←":
@@ -926,7 +912,6 @@ def generate_pdf(steps, meta):
                     if abs(s["cy"] - a["cy"]) < 1*mm:
                         pdf_arrow_horiz(c, x_from, x_to, y, "left", ac, lbl, ac)
                     else:
-                        # Elbow: go left, then down (or up) to target
                         mid_y = (s["cy"] + a["cy"]) / 2
                         c.setStrokeColor(ac); c.setLineWidth(0.6)
                         c.line(x_from, s["cy"], x_to, s["cy"])
@@ -937,9 +922,8 @@ def generate_pdf(steps, meta):
                             c.drawCentredString((x_from+x_to)/2, s["cy"]+1*mm, lbl)
                         c.setStrokeColor(colors.black); c.setFillColor(colors.black)
 
-                else:  # default: downward
+                else:
                     if abs(s["cx"] - a["cx"]) < 1:
-                        # Straight vertical
                         pdf_line_down(c, a["cx"], s["bot"], a["top"], col=ac)
                         if lbl:
                             c.setFont("Helvetica-Bold", 6); c.setFillColor(ac)
@@ -948,20 +932,18 @@ def generate_pdf(steps, meta):
                     else:
                         pdf_elbow_down(c, s["cx"], s["bot"], a["cx"], a["top"], col=ac, lbl=lbl, lbl_col=ac)
         else:
-            # Auto-connect: straight down to previous same-column step
             if idx > 0:
                 prev = next((pi for pi in range(idx-1,-1,-1) if anchors[pi]["col"]==a["col"]), None)
                 if prev is not None:
                     ps = anchors[prev]
                     pdf_line_down(c, a["cx"], ps["bot"], a["top"])
 
-        # Loop-back arrow (dashed, runs along left margin of flow cell)
+        # Loop-back arrow (dashed)
         if lt.isdigit():
             dest_idx = int(lt)
             if 0 <= dest_idx < len(anchors):
                 dest = anchors[dest_idx]
                 lc   = GREEN if ll.upper()=="YES" else (RED if ll.upper()=="NO" else BLUE)
-                # Route: left of shape → far left of flow cell → up → right to dest
                 loop_x = FLOW_L + 1.5*mm
                 c.setStrokeColor(lc); c.setLineWidth(0.55); c.setDash(2.5, 1.8)
                 c.line(a["sh_x"],     a["cy"],  loop_x, a["cy"])
@@ -975,26 +957,24 @@ def generate_pdf(steps, meta):
                     c.setFillColor(colors.black)
                 c.setStrokeColor(colors.black)
 
-    # ── Shapes (drawn after arrows so they appear on top) ─────────────────────
+    # ── Shapes (drawn on top of arrows) ───────────────────────────────────────
     GREEN2 = colors.HexColor("#006600"); RED2 = colors.HexColor("#CC0000")
     for idx, step in enumerate(steps):
         a     = anchors[idx]
         sh_x  = a["sh_x"]; sh_bot = a["bot"]
-        sw    = a["sh_w"]; sh_h   = a["sh_h"]
+        sw    = a["sh_w"]; sh_h_val = a["sh_h"]
         shape = step["shape"]
         txt   = (step.get("text") or "")
         yl    = (step.get("yes_label") or "YES")
         nl    = (step.get("no_label")  or "NO")
 
-        if   shape=="rect":          draw_rect_pdf(c, sh_x, sh_bot, sw, sh_h, txt)
-        elif shape=="oval":          draw_oval_pdf(c, sh_x, sh_bot, sw, sh_h, txt)
-        elif shape=="parallelogram": draw_para_pdf(c, sh_x, sh_bot, sw, sh_h, txt)
+        if   shape=="rect":          draw_rect_pdf(c, sh_x, sh_bot, sw, sh_h_val, txt)
+        elif shape=="oval":          draw_oval_pdf(c, sh_x, sh_bot, sw, sh_h_val, txt)
+        elif shape=="parallelogram": draw_para_pdf(c, sh_x, sh_bot, sw, sh_h_val, txt)
         elif shape=="diamond":
-            draw_diamond_pdf(c, sh_x, sh_bot, sw, sh_h, txt)
-            # YES label (right of diamond)
+            draw_diamond_pdf(c, sh_x, sh_bot, sw, sh_h_val, txt)
             c.setFont("Helvetica-Bold", 6.5); c.setFillColor(GREEN2)
             c.drawString(sh_x+sw+1*mm, a["cy"]-1.5*mm, yl)
-            # NO label (left of diamond)
             nw = c.stringWidth(nl, "Helvetica-Bold", 6.5)
             c.setFillColor(RED2)
             c.drawString(sh_x-nw-1*mm, a["cy"]-1.5*mm, nl)
@@ -1003,9 +983,9 @@ def generate_pdf(steps, meta):
             c.setFont("Helvetica-Oblique", 7); c.setFillColor(colors.HexColor("#333333"))
             c.drawCentredString(a["cx"], a["cy"], txt); c.setFillColor(colors.black)
 
-        # Step number badge (small circle top-left of shape)
+        # Step number badge
         badge_r = 2.8*mm
-        bx = sh_x + badge_r; by = sh_bot + sh_h - badge_r
+        bx = sh_x + badge_r; by = sh_bot + sh_h_val - badge_r
         c.setFillColor(colors.HexColor("#2B6CB0"))
         c.circle(bx, by, badge_r, fill=1, stroke=0)
         c.setFont("Helvetica-Bold", 6); c.setFillColor(colors.white)
@@ -1014,11 +994,8 @@ def generate_pdf(steps, meta):
 
     cur_y = TABLE_BOTTOM
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 5 — SOP CHANGE RECORD
-    # ═══════════════════════════════════════════════════════════════════════════
+    # ── SECTION 5: SOP CHANGE RECORD ─────────────────────────────────────────
     cur_y -= 2.5*mm
-    CR_TH = 7*mm
     c.setFillColor(colors.HexColor("#BDD7EE"))
     c.rect(ML, cur_y-CR_TH, TW, CR_TH, fill=1, stroke=1); c.setFillColor(colors.black)
     c.setFont("Helvetica-Bold", 9)
@@ -1032,7 +1009,6 @@ def generate_pdf(steps, meta):
     CR_XS = [ML]
     for w in CR_W: CR_XS.append(CR_XS[-1]+w)
 
-    CR_HH = 8*mm
     for i,lbl in enumerate(CR_COLS):
         cw = CR_XS[i+1]-CR_XS[i]
         c.setFillColor(colors.HexColor("#D6E8F7"))
@@ -1045,7 +1021,6 @@ def generate_pdf(steps, meta):
             c.drawCentredString(CR_XS[i]+cw/2, y0-li*lh_cr, ln)
     cur_y -= CR_HH
 
-    CR_RH = 6.5*mm
     for row in meta.get("change_records", []):
         vals = [row.get("sno",""), row.get("date",""), row.get("rev",""), row.get("desc",""),
                 row.get("change_letter",""), row.get("prepared",""),
@@ -1056,7 +1031,7 @@ def generate_pdf(steps, meta):
             c.rect(CR_XS[i], cur_y-CR_RH, cw, CR_RH, fill=1, stroke=1)
             draw_ctext(c, val, CR_XS[i]+cw/2, cur_y-CR_RH/2, cw-3, fs=7)
         cur_y -= CR_RH
-    # Two blank rows
+
     for _ in range(2):
         for i in range(len(CR_COLS)):
             cw = CR_XS[i+1]-CR_XS[i]
