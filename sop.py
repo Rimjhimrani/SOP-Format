@@ -662,7 +662,7 @@ def generate_pdf(steps, meta):
             c.setStrokeColor(colors.black); c.setLineWidth(0.35)
             c.rect(xs[ci], ry, cw, rh, fill=1, stroke=1); c.setFillColor(colors.black)
             draw_ltext(c, txt, xs[ci]+2, ry+rh/2, cw-3,
-                       "Helvetica-Bold" if is_lbl else "Helvetica", 8)
+                       "Helvetica-Bold" if is_lbl else "Helvetica", 10)
     cur_y = hdr_bot - GAP1
 
     # ── SECTION 2: PURPOSE / SCOPE ────────────────────────────────────────────
@@ -676,7 +676,7 @@ def generate_pdf(steps, meta):
             c.setFont("Helvetica-Bold", 8)
             c.drawString(x+3, cur_y-PS_H/2-3, txt)
         else:
-            draw_ltext(c, txt, x+3, cur_y-PS_H/2, w-5, fs=8)
+            draw_ltext(c, txt, x+3, cur_y-PS_H/2, w-5, fs=11)
     cur_y -= PS_H + GAP2
 
     # ── SECTION 3: PROCESS BANNER + COLUMN HEADERS ───────────────────────────
