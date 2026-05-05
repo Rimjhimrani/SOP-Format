@@ -524,7 +524,7 @@ def pdf_elbow_down(c, sx, sy_bot, ex, ey_top, col=colors.black, lbl="", lbl_col=
     c.line(ex, mid_y, ex, ey_top + AH_STOP)
     arrow_head_pdf(c, ex, ey_top, "down")
     if lbl:
-        c.setFont("Helvetica-Bold", 6); c.setFillColor(lbl_col)
+        c.setFont("Helvetica-Bold", 7); c.setFillColor(lbl_col)
         c.drawCentredString((sx+ex)/2, mid_y + 1*mm, lbl)
     c.setStrokeColor(colors.black); c.setFillColor(colors.black)
 
@@ -539,7 +539,7 @@ def pdf_arrow_horiz(c, x_from, x_to, y, direction="right",
         arrow_head_pdf(c, x_to, y, "left")
     if lbl:
         mid_x = (x_from + x_to) / 2
-        c.setFont("Helvetica-Bold", 6); c.setFillColor(lbl_col)
+        c.setFont("Helvetica-Bold", 7); c.setFillColor(lbl_col)
         c.drawCentredString(mid_x, y + 1.2*mm, lbl)
     c.setStrokeColor(colors.black); c.setFillColor(colors.black)
 
@@ -550,21 +550,23 @@ def pdf_horiz_then_down(c, x_from, y_from, x_to, y_to,
     c.line(x_to, y_from, x_to, y_to + AH_STOP)
     arrow_head_pdf(c, x_to, y_to, "down")
     if lbl:
-        c.setFont("Helvetica-Bold", 6); c.setFillColor(lbl_col)
+        c.setFont("Helvetica-Bold", 7); c.setFillColor(lbl_col)
         c.drawCentredString((x_from+x_to)/2, y_from + 1*mm, lbl)
     c.setStrokeColor(colors.black); c.setFillColor(colors.black)
 
-def draw_rect_pdf(c, x, y, w, h, text, fs=8):
+# ── UPDATED: increased default font sizes for all shape draw functions ────────
+
+def draw_rect_pdf(c, x, y, w, h, text, fs=10):
     c.setStrokeColor(colors.black); c.setFillColor(colors.white); c.setLineWidth(0.5)
     c.rect(x, y, w, h, fill=1, stroke=1)
     draw_ctext(c, text, x+w/2, y+h/2, w-3, fs=fs)
 
-def draw_oval_pdf(c, x, y, w, h, text, fs=8):
+def draw_oval_pdf(c, x, y, w, h, text, fs=10):
     c.setStrokeColor(colors.black); c.setFillColor(colors.HexColor("#2c2c2c")); c.setLineWidth(0.5)
     c.ellipse(x, y, x+w, y+h, fill=1, stroke=1)
     draw_ctext(c, text, x+w/2, y+h/2, w-3, fs=fs, col=colors.white)
 
-def draw_diamond_pdf(c, x, y, w, h, text, fs=7):
+def draw_diamond_pdf(c, x, y, w, h, text, fs=9):
     cx=x+w/2; cy=y+h/2
     p=c.beginPath()
     p.moveTo(cx, y+h); p.lineTo(x+w, cy); p.lineTo(cx, y); p.lineTo(x, cy); p.close()
@@ -572,7 +574,7 @@ def draw_diamond_pdf(c, x, y, w, h, text, fs=7):
     c.drawPath(p, fill=1, stroke=1)
     draw_ctext(c, text, cx, cy, w*0.50, fs=fs)
 
-def draw_para_pdf(c, x, y, w, h, text, fs=8):
+def draw_para_pdf(c, x, y, w, h, text, fs=10):
     sk=4
     p=c.beginPath()
     p.moveTo(x+sk, y+h); p.lineTo(x+w, y+h); p.lineTo(x+w-sk, y); p.lineTo(x, y); p.close()
@@ -610,6 +612,7 @@ def generate_pdf(steps, meta):
     cur_y = PH - MT
 
     # ── SECTION 1: TOP HEADER ─────────────────────────────────────────────────
+    # ── UPDATED: narrower label/value columns in right metadata grid ──────────
     LOGO_W = 50*mm
     TITLE_W= 100*mm
     META_W = TW - LOGO_W - TITLE_W
@@ -629,14 +632,14 @@ def generate_pdf(steps, meta):
             c.drawImage(logo_img, ML+4, hdr_bot+(HDR_H-lh)/2,
                         width=lw, height=lh, preserveAspectRatio=True, mask="auto")
         except Exception:
-            c.setFont("Helvetica-Bold",10); c.setFillColor(colors.black)
+            c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
             c.drawString(ML+4, hdr_top-10, meta["company_name"])
     else:
-        c.setFont("Helvetica-Bold",10); c.setFillColor(colors.black)
+        c.setFont("Helvetica-Bold",11); c.setFillColor(colors.black)
         c.drawString(ML+4, (hdr_top+hdr_bot)/2+2, meta["company_name"])
 
     title_cx = ML + LOGO_W + TITLE_W/2
-    title_mid = (hdr_top + hdr_bot) / 2          # vertical center of header block
+    title_mid = (hdr_top + hdr_bot) / 2
     c.setFont("Helvetica-Bold", 14); c.setFillColor(colors.black)
     c.drawCentredString(title_cx, title_mid + 6, "STANDARD OPERATING PROCEDURE")
     sub_lines = wrapped_lines_pdf(c, meta["title"], TITLE_W-8, "Helvetica", 13)
@@ -644,6 +647,7 @@ def generate_pdf(steps, meta):
     for i, ln in enumerate(sub_lines):
         c.drawCentredString(title_cx, title_mid - 8 - i*12, ln)
 
+    # ── UPDATED: narrower columns — c1w label, c2w value, c3w label, c4w value
     RX = ML + LOGO_W + TITLE_W
     rh = HDR_H / 4
     c1w=18*mm; c2w=30*mm; c3w=14*mm; c4w=META_W-c1w-c2w-c3w
@@ -661,8 +665,9 @@ def generate_pdf(steps, meta):
             c.setFillColor(colors.HexColor("#D6E8F7") if is_lbl else colors.white)
             c.setStrokeColor(colors.black); c.setLineWidth(0.35)
             c.rect(xs[ci], ry, cw, rh, fill=1, stroke=1); c.setFillColor(colors.black)
+            # ── UPDATED: font size 11 for all header metadata cells ───────────
             draw_ltext(c, txt, xs[ci]+2, ry+rh/2, cw-3,
-                       "Helvetica-Bold" if is_lbl else "Helvetica", 10)
+                       "Helvetica-Bold" if is_lbl else "Helvetica", 11)
     cur_y = hdr_bot - GAP1
 
     # ── SECTION 2: PURPOSE / SCOPE ────────────────────────────────────────────
@@ -695,19 +700,21 @@ def generate_pdf(steps, meta):
           ML+COL_IN+COL_FLOW+COL_OUT+COL_RESP+COL_DOC,
           ML+TW]
 
+    # ── UPDATED: font size 11 for process banner ──────────────────────────────
     c.setFillColor(colors.HexColor("#BDD7EE"))
     c.rect(ML, cur_y-BNR_H, TW, BNR_H, fill=1, stroke=1); c.setFillColor(colors.black)
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont("Helvetica-Bold", 11)
     c.drawString(ML+3, cur_y-BNR_H/2-3, "Process Steps:")
     c.drawString(XS[2]+3, cur_y-BNR_H/2-3, f"OWNER :  {meta['owner']}")
     cur_y -= BNR_H
 
+    # ── UPDATED: font size 9 for column headers ───────────────────────────────
     hdr_labels = ["Input","Process Flow","Output","Responsible","Doc. Format /\nSystem","Effective\nMeasurement"]
     for i,label in enumerate(hdr_labels):
         cw = XS[i+1]-XS[i]
         c.setFillColor(colors.HexColor("#D6E8F7"))
         c.rect(XS[i], cur_y-HDR2_H, cw, HDR2_H, fill=1, stroke=1); c.setFillColor(colors.black)
-        lines = label.split("\n"); fs_h=7; lh=fs_h*1.3
+        lines = label.split("\n"); fs_h=9; lh=fs_h*1.3
         total_h = len(lines)*lh; y_mid = cur_y-HDR2_H/2
         y0 = y_mid + total_h/2 - lh*0.75
         for li,ln in enumerate(lines):
@@ -789,10 +796,6 @@ def generate_pdf(steps, meta):
 
     V_PAD = V_PAD_RATIO * UNIT
 
-    # ── SH_H_PDF: actual PDF height per shape (fixed mm values) ──────────────
-    # This dict maps shape names → point heights used when building anchors.
-    # It is intentionally separate from the scaled UNIT-based logic so that
-    # shapes have a sensible minimum physical size regardless of flow length.
     SHAPE_PDF_HEIGHTS = {
         "rect":          13 * mm,
         "oval":          10 * mm,
@@ -841,13 +844,13 @@ def generate_pdf(steps, meta):
         c.line(XS[0], y, XS[1], y)
         c.line(XS[2], y, XS[-1], y)
 
-    # Build shape anchors using SHAPE_PDF_HEIGHTS (fixes the NameError)
+    # Build shape anchors
     anchors = {}
     for idx, step in enumerate(steps):
         ri  = step_to_row[idx]; rg = row_geom[ri]
         ry  = rg["ry"]; ROW_H = rg["ROW_H"]
         col = step.get("column","left")
-        shape_h = SHAPE_PDF_HEIGHTS.get(step["shape"], 13*mm)   # ← was SH_H_PDF (undefined)
+        shape_h = SHAPE_PDF_HEIGHTS.get(step["shape"], 13*mm)
         cx      = _cx(col)
         sw      = _sw(col)
         sh_x    = cx - sw/2
@@ -870,7 +873,7 @@ def generate_pdf(steps, meta):
     RED   = colors.HexColor("#CC0000")
     BLUE  = colors.HexColor("#1a6dcc")
 
-    # Side-column text
+    # ── UPDATED: font size 9 for side-column text ─────────────────────────────
     for pi, row in enumerate(rows):
         rg = row_geom[pi]; ry = rg["ry"]; ROW_H = rg["ROW_H"]
         ref = (row.get("left") if row.get("left") is not None else
@@ -882,7 +885,7 @@ def generate_pdf(steps, meta):
             txt = (step.get(key) or "")
             if txt:
                 cw = XS[ci+1]-XS[ci]
-                draw_ctext(c, txt, XS[ci]+cw/2, ry+ROW_H/2, cw-3, fs=7)
+                draw_ctext(c, txt, XS[ci]+cw/2, ry+ROW_H/2, cw-3, fs=9)
 
     # ── Arrows ────────────────────────────────────────────────────────────────
     for idx, step in enumerate(steps):
@@ -919,7 +922,7 @@ def generate_pdf(steps, meta):
                         c.line(x_to, s["cy"], x_to, a["top"] + AH_STOP)
                         arrow_head_pdf(c, x_to, a["top"], "down")
                         if lbl:
-                            c.setFont("Helvetica-Bold", 6); c.setFillColor(ac)
+                            c.setFont("Helvetica-Bold", 7); c.setFillColor(ac)
                             c.drawCentredString((x_from+x_to)/2, s["cy"]+1*mm, lbl)
                         c.setStrokeColor(colors.black); c.setFillColor(colors.black)
 
@@ -927,7 +930,7 @@ def generate_pdf(steps, meta):
                     if abs(s["cx"] - a["cx"]) < 1:
                         pdf_line_down(c, a["cx"], s["bot"], a["top"], col=ac)
                         if lbl:
-                            c.setFont("Helvetica-Bold", 6); c.setFillColor(ac)
+                            c.setFont("Helvetica-Bold", 7); c.setFillColor(ac)
                             c.drawCentredString(a["cx"]+3*mm, (s["bot"]+a["top"])/2, lbl)
                             c.setFillColor(colors.black)
                     else:
@@ -953,7 +956,7 @@ def generate_pdf(steps, meta):
                 c.setDash()
                 arrow_head_pdf(c, dest["left"], dest["cy"], "right")
                 if ll:
-                    c.setFont("Helvetica-Bold", 6); c.setFillColor(lc)
+                    c.setFont("Helvetica-Bold", 7); c.setFillColor(lc)
                     c.drawString(loop_x + 0.5*mm, (a["cy"]+dest["cy"])/2 + 0.5*mm, ll)
                     c.setFillColor(colors.black)
                 c.setStrokeColor(colors.black)
@@ -974,14 +977,16 @@ def generate_pdf(steps, meta):
         elif shape=="parallelogram": draw_para_pdf(c, sh_x, sh_bot, sw, sh_h_val, txt)
         elif shape=="diamond":
             draw_diamond_pdf(c, sh_x, sh_bot, sw, sh_h_val, txt)
-            c.setFont("Helvetica-Bold", 6.5); c.setFillColor(GREEN2)
+            # ── UPDATED: YES/NO labels font size 7.5 ─────────────────────────
+            c.setFont("Helvetica-Bold", 7.5); c.setFillColor(GREEN2)
             c.drawString(sh_x+sw+1*mm, a["cy"]-1.5*mm, yl)
-            nw = c.stringWidth(nl, "Helvetica-Bold", 6.5)
+            nw = c.stringWidth(nl, "Helvetica-Bold", 7.5)
             c.setFillColor(RED2)
             c.drawString(sh_x-nw-1*mm, a["cy"]-1.5*mm, nl)
             c.setFillColor(colors.black)
         elif shape=="arrow_text":
-            c.setFont("Helvetica-Oblique", 7); c.setFillColor(colors.HexColor("#333333"))
+            # ── UPDATED: annotation text font size 8 ─────────────────────────
+            c.setFont("Helvetica-Oblique", 8); c.setFillColor(colors.HexColor("#333333"))
             c.drawCentredString(a["cx"], a["cy"], txt); c.setFillColor(colors.black)
 
         # Step number badge
@@ -999,7 +1004,8 @@ def generate_pdf(steps, meta):
     cur_y -= 2.5*mm
     c.setFillColor(colors.HexColor("#BDD7EE"))
     c.rect(ML, cur_y-CR_TH, TW, CR_TH, fill=1, stroke=1); c.setFillColor(colors.black)
-    c.setFont("Helvetica-Bold", 9)
+    # ── UPDATED: "SOP Change Record" title font size 11 ──────────────────────
+    c.setFont("Helvetica-Bold", 11)
     c.drawCentredString(ML+TW/2, cur_y-CR_TH/2-3, "SOP Change Record")
     cur_y -= CR_TH
 
@@ -1010,11 +1016,12 @@ def generate_pdf(steps, meta):
     CR_XS = [ML]
     for w in CR_W: CR_XS.append(CR_XS[-1]+w)
 
+    # ── UPDATED: change record column header font size 8.5 ───────────────────
     for i,lbl in enumerate(CR_COLS):
         cw = CR_XS[i+1]-CR_XS[i]
         c.setFillColor(colors.HexColor("#D6E8F7"))
         c.rect(CR_XS[i], cur_y-CR_HH, cw, CR_HH, fill=1, stroke=1); c.setFillColor(colors.black)
-        lines = lbl.split("\n"); fs_cr=6.5; lh_cr=fs_cr*1.3
+        lines = lbl.split("\n"); fs_cr=8.5; lh_cr=fs_cr*1.3
         total_h = len(lines)*lh_cr; y_mid = cur_y-CR_HH/2
         y0 = y_mid + total_h/2 - lh_cr*0.75
         for li,ln in enumerate(lines):
@@ -1022,6 +1029,7 @@ def generate_pdf(steps, meta):
             c.drawCentredString(CR_XS[i]+cw/2, y0-li*lh_cr, ln)
     cur_y -= CR_HH
 
+    # ── UPDATED: change record data rows font size 9 ──────────────────────────
     for row in meta.get("change_records", []):
         vals = [row.get("sno",""), row.get("date",""), row.get("rev",""), row.get("desc",""),
                 row.get("change_letter",""), row.get("prepared",""),
@@ -1030,7 +1038,7 @@ def generate_pdf(steps, meta):
             cw = CR_XS[i+1]-CR_XS[i]
             c.setFillColor(colors.white)
             c.rect(CR_XS[i], cur_y-CR_RH, cw, CR_RH, fill=1, stroke=1)
-            draw_ctext(c, val, CR_XS[i]+cw/2, cur_y-CR_RH/2, cw-3, fs=7)
+            draw_ctext(c, val, CR_XS[i]+cw/2, cur_y-CR_RH/2, cw-3, fs=9)
         cur_y -= CR_RH
 
     for _ in range(2):
@@ -1041,7 +1049,8 @@ def generate_pdf(steps, meta):
         cur_y -= CR_RH
 
     cur_y -= 3*mm
-    c.setFont("Helvetica-Oblique", 7); c.setFillColor(colors.HexColor("#555555"))
+    # ── UPDATED: footer font size 9 ───────────────────────────────────────────
+    c.setFont("Helvetica-Oblique", 9); c.setFillColor(colors.HexColor("#555555"))
     c.drawCentredString(ML+TW/2, cur_y, f"Composed By: {meta['composed_by']}")
 
     c.save(); buf.seek(0); return buf
