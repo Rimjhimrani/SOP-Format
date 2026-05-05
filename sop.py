@@ -584,12 +584,31 @@ def generate_pdf(steps, meta):
 
     ML = 8*mm; MR = 8*mm; MT = 8*mm
     TW = PW - ML - MR
-    cur_y = PH - MT   # top of usable area (Y decreases downward in drawing terms)
+
+    # ── Pre-calculate all fixed section heights so flow gets exact remainder ──
+    HDR_H   = 28*mm
+    PS_H    = 9*mm
+    BNR_H   = 7*mm
+    HDR2_H  = 9*mm
+    CR_TH   = 7*mm    # change record title bar
+    CR_HH   = 8*mm    # change record header row
+    CR_RH   = 6.5*mm  # change record data row height
+    N_CR_DATA_ROWS = len(meta.get("change_records", [])) + 2   # data + 2 blanks
+    FOOTER_H = 5*mm
+    GAP1     = 1.5*mm  # gap after header
+    GAP2     = 1.5*mm  # gap after purpose row
+    GAP3     = 2.5*mm  # gap before change record
+
+    FIXED_H = (HDR_H + GAP1 + PS_H + GAP2 + BNR_H + HDR2_H
+               + GAP3 + CR_TH + CR_HH + N_CR_DATA_ROWS*CR_RH + FOOTER_H + 2*MT)
+
+    FLOW_AVAIL = PH - FIXED_H   # exact pixels available for the flow table rows
+
+    cur_y = PH - MT   # start drawing from top
 
     # ═══════════════════════════════════════════════════════════════════════════
     # SECTION 1 — TOP HEADER
     # ═══════════════════════════════════════════════════════════════════════════
-    HDR_H  = 28*mm
     LOGO_W = 50*mm
     TITLE_W= 100*mm
     META_W = TW - LOGO_W - TITLE_W
@@ -645,12 +664,11 @@ def generate_pdf(steps, meta):
             c.rect(xs[ci], ry, cw, rh, fill=1, stroke=1); c.setFillColor(colors.black)
             draw_ltext(c, txt, xs[ci]+2, ry+rh/2, cw-3,
                        "Helvetica-Bold" if is_lbl else "Helvetica", 8)
-    cur_y = hdr_bot - 1.5*mm
+    cur_y = hdr_bot - GAP1
 
     # ═══════════════════════════════════════════════════════════════════════════
     # SECTION 2 — PURPOSE / SCOPE ROW
     # ═══════════════════════════════════════════════════════════════════════════
-    PS_H = 9*mm
     PL_W = 20*mm; PV_W = 80*mm; SL_W = 16*mm; SV_W = TW-PL_W-PV_W-SL_W
     c.setLineWidth(0.5)
     for x,w,txt,is_lbl in [(ML,PL_W,"Purpose",True),(ML+PL_W,PV_W,meta["purpose"],False),
@@ -662,12 +680,11 @@ def generate_pdf(steps, meta):
             c.drawString(x+3, cur_y-PS_H/2-3, txt)
         else:
             draw_ltext(c, txt, x+3, cur_y-PS_H/2, w-5, fs=8)
-    cur_y -= PS_H + 1.5*mm
+    cur_y -= PS_H + GAP2
 
     # ═══════════════════════════════════════════════════════════════════════════
     # SECTION 3 — PROCESS STEPS BANNER + COLUMN HEADERS
     # ═══════════════════════════════════════════════════════════════════════════
-    # Outer column widths
     COL_IN   = 18*mm
     COL_OUT  = 18*mm
     COL_RESP = 22*mm
@@ -684,7 +701,6 @@ def generate_pdf(steps, meta):
           ML+TW]
 
     # Banner
-    BNR_H = 7*mm
     c.setFillColor(colors.HexColor("#BDD7EE"))
     c.rect(ML, cur_y-BNR_H, TW, BNR_H, fill=1, stroke=1); c.setFillColor(colors.black)
     c.setFont("Helvetica-Bold", 9)
@@ -693,7 +709,6 @@ def generate_pdf(steps, meta):
     cur_y -= BNR_H
 
     # Column headers
-    HDR2_H = 9*mm
     hdr_labels = ["Input","Process Flow","Output","Responsible","Doc. Format /\nSystem","Effective\nMeasurement"]
     for i,label in enumerate(hdr_labels):
         cw = XS[i+1]-XS[i]
@@ -708,7 +723,7 @@ def generate_pdf(steps, meta):
     cur_y -= HDR2_H
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # SECTION 4 — FLOW TABLE DATA ROWS
+    # SECTION 4 — FLOW TABLE DATA ROWS  (auto-scaled to fit FLOW_AVAIL)
     # ═══════════════════════════════════════════════════════════════════════════
     has_left_br = any(s.get("column","left")=="left_branch" for s in steps)
     has_right   = any(s.get("column","left")=="right"       for s in steps)
@@ -731,8 +746,8 @@ def generate_pdf(steps, meta):
         SUB_C_W  = COL_FLOW
         SUB_R_W  = 0
 
-    FLOW_L = XS[1]   # left edge of process-flow column
-    FLOW_R = XS[2]   # right edge of process-flow column
+    FLOW_L = XS[1]
+    FLOW_R = XS[2]
 
     LB_CX = FLOW_L + SUB_LB_W/2                          if has_left_br else None
     C_CX  = FLOW_L + SUB_LB_W + SUB_C_W/2
@@ -743,25 +758,7 @@ def generate_pdf(steps, meta):
         if col=="right":       return R_CX  or C_CX
         return C_CX
 
-    # Shape dimensions — generous for A3
-    SH_H_PDF = {
-        "rect":         13*mm,
-        "oval":         10*mm,
-        "parallelogram":13*mm,
-        "diamond":      20*mm,
-        "arrow_text":    6*mm,
-    }
-    # Shape widths — 82 % of sub-column, capped for readability
-    def _sw(col):
-        if col == "left_branch": sub = SUB_LB_W
-        elif col == "right":     sub = SUB_R_W
-        else:                    sub = SUB_C_W
-        return max(sub * 0.82, 18*mm)
-
-    V_PAD  = 3.5*mm   # vertical padding above/below shape in its row
-    MIN_ROW_H = 22*mm
-
-    # Build rows (same packing logic as SVG preview)
+    # ── Build rows first (packing logic) ─────────────────────────────────────
     rows = []; step_to_row = {}
     for idx, step in enumerate(steps):
         col = step.get("column","left")
@@ -785,15 +782,41 @@ def generate_pdf(steps, meta):
             rows.append({"left_branch":None,"left":idx,"right":None})
             step_to_row[idx] = len(rows)-1
 
-    # Compute row heights and Y positions (ReportLab: Y grows upward)
+    # ── Determine base shape heights, then scale to fit FLOW_AVAIL exactly ───
+    # Base ratios (diamond taller, arrow_text shorter)
+    BASE_SH = {"rect":1.0, "oval":0.77, "parallelogram":1.0, "diamond":1.54, "arrow_text":0.46}
+    V_PAD_RATIO = 0.27   # V_PAD = V_PAD_RATIO * UNIT
+
+    # Total height = sum over rows of: max_shape_ratio * UNIT + 2 * V_PAD_RATIO * UNIT
+    row_ratios = []
+    for row in rows:
+        hl  = BASE_SH.get(steps[row["left"]]["shape"],         1.0) if row.get("left")         is not None else 0
+        hr  = BASE_SH.get(steps[row["right"]]["shape"],        1.0) if row.get("right")        is not None else 0
+        hlb = BASE_SH.get(steps[row["left_branch"]]["shape"],  1.0) if row.get("left_branch")  is not None else 0
+        row_ratios.append(max(hl, hr, hlb) + 2 * V_PAD_RATIO)
+
+    total_ratio = sum(row_ratios)
+    # UNIT = height of one "standard rect" row including padding
+    UNIT = FLOW_AVAIL / total_ratio if total_ratio > 0 else 10*mm
+    # Clamp UNIT so shapes don't get absurdly large on short flows
+    UNIT = min(UNIT, 18*mm)
+
+    def sh_h(shape):
+        return BASE_SH.get(shape, 1.0) * UNIT
+
+    V_PAD = V_PAD_RATIO * UNIT
+
+    def _sw(col):
+        if col == "left_branch": sub = SUB_LB_W
+        elif col == "right":     sub = SUB_R_W
+        else:                    sub = SUB_C_W
+        return max(sub * 0.82, 15*mm)
+
+    # ── Compute row Y positions using scaled UNIT ─────────────────────────────
     TABLE_TOP = cur_y
     row_geom = []; sy2 = TABLE_TOP
-    for row in rows:
-        hl  = SH_H_PDF.get(steps[row["left"]]["shape"],         13*mm) if row.get("left")         is not None else 0
-        hr  = SH_H_PDF.get(steps[row["right"]]["shape"],        13*mm) if row.get("right")        is not None else 0
-        hlb = SH_H_PDF.get(steps[row["left_branch"]]["shape"],  13*mm) if row.get("left_branch")  is not None else 0
-        ROW_H = max(hl, hr, hlb) + 2*V_PAD
-        ROW_H = max(ROW_H, MIN_ROW_H)
+    for row, ratio in zip(rows, row_ratios):
+        ROW_H = ratio * UNIT
         ry = sy2 - ROW_H
         row_geom.append({"ry": ry, "ROW_H": ROW_H})
         sy2 = ry
