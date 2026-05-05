@@ -646,7 +646,7 @@ def generate_pdf(steps, meta):
 
     RX = ML + LOGO_W + TITLE_W
     rh = HDR_H / 4
-    c1w=22*mm; c2w=46*mm; c3w=16*mm; c4w=META_W-c1w-c2w-c3w
+    c1w=18*mm; c2w=30*mm; c3w=14*mm; c4w=META_W-c1w-c2w-c3w
     meta_rows = [
         ("SOP No.", meta["sop_no"],  "Page",    meta["page_info"]),
         ("Rev No.", meta["rev_no"],  "Date",    meta["date"]),
