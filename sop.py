@@ -589,7 +589,7 @@ def generate_pdf(steps, meta):
     ML = 8*mm; MR = 8*mm; MT = 8*mm
     TW = PW - ML - MR
 
-    HDR_H   = 28*mm
+    HDR_H   = 38*mm
     PS_H    = 9*mm
     BNR_H   = 7*mm
     HDR2_H  = 9*mm
