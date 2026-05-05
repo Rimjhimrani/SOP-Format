@@ -636,12 +636,13 @@ def generate_pdf(steps, meta):
         c.drawString(ML+4, (hdr_top+hdr_bot)/2+2, meta["company_name"])
 
     title_cx = ML + LOGO_W + TITLE_W/2
+    title_mid = (hdr_top + hdr_bot) / 2          # vertical center of header block
     c.setFont("Helvetica-Bold", 13); c.setFillColor(colors.black)
-    c.drawCentredString(title_cx, hdr_top - 10, "STANDARD OPERATING PROCEDURE")
+    c.drawCentredString(title_cx, title_mid + 6, "STANDARD OPERATING PROCEDURE")
     sub_lines = wrapped_lines_pdf(c, meta["title"], TITLE_W-8, "Helvetica", 10)
     c.setFont("Helvetica", 10)
     for i, ln in enumerate(sub_lines):
-        c.drawCentredString(title_cx, hdr_top - 22 - i*12, ln)
+        c.drawCentredString(title_cx, title_mid - 8 - i*12, ln)
 
     RX = ML + LOGO_W + TITLE_W
     rh = HDR_H / 4
