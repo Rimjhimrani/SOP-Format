@@ -673,7 +673,7 @@ def generate_pdf(steps, meta):
         c.setFillColor(colors.HexColor("#D6E8F7") if is_lbl else colors.white)
         c.rect(x, cur_y-PS_H, w, PS_H, fill=1, stroke=1); c.setFillColor(colors.black)
         if is_lbl:
-            c.setFont("Helvetica-Bold", 8)
+            c.setFont("Helvetica-Bold", 11)
             c.drawString(x+3, cur_y-PS_H/2-3, txt)
         else:
             draw_ltext(c, txt, x+3, cur_y-PS_H/2, w-5, fs=11)
