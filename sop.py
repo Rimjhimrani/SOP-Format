@@ -640,7 +640,7 @@ def generate_pdf(steps, meta):
     c.setFont("Helvetica-Bold", 13); c.setFillColor(colors.black)
     c.drawCentredString(title_cx, title_mid + 6, "STANDARD OPERATING PROCEDURE")
     sub_lines = wrapped_lines_pdf(c, meta["title"], TITLE_W-8, "Helvetica", 13)
-    c.setFont("Helvetica", 10)
+    c.setFont("Helvetica", 13)
     for i, ln in enumerate(sub_lines):
         c.drawCentredString(title_cx, title_mid - 8 - i*12, ln)
 
