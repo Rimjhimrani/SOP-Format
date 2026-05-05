@@ -47,7 +47,7 @@ defaults = {
     "purpose": "Supply of Supplier Packs to Line Side",
     "scope": "All Parts under direct supply category (suggested by quality/operation)",
     "owner": "Stores Manager", "company_name": "PINNACLE MOBILITY",
-    "composed_by": "Agilomatrix Pvt Ltd (connectus@agilomatrix.com)",
+    "composed_by": "Agilomatrix Pvt Ltd (admin@agilomatrix.com)",
     "ai_description": "", "ai_mode": "AI Generate", "gemini_api_key": "",
     "logo_bytes": None, "logo_name": "",
     "change_records": [
