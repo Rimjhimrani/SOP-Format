@@ -612,10 +612,10 @@ def generate_pdf(steps, meta):
     cur_y = PH - MT
 
     # ── SECTION 1: TOP HEADER ─────────────────────────────────────────────────
-    # ── UPDATED: narrower label/value columns in right metadata grid ──────────
-    LOGO_W = 50*mm
-    TITLE_W= 100*mm
-    META_W = TW - LOGO_W - TITLE_W
+    # META_W fixed to compact width so value columns don't stretch across the page
+    LOGO_W  = 50*mm
+    META_W  = 110*mm          # fixed: 4 cols of label+value, compact
+    TITLE_W = TW - LOGO_W - META_W   # takes the remaining middle space
 
     hdr_top = cur_y
     hdr_bot = cur_y - HDR_H
@@ -647,10 +647,14 @@ def generate_pdf(steps, meta):
     for i, ln in enumerate(sub_lines):
         c.drawCentredString(title_cx, title_mid - 8 - i*12, ln)
 
-    # ── UPDATED: narrower columns — c1w label, c2w value, c3w label, c4w value
-    RX = ML + LOGO_W + TITLE_W
-    rh = HDR_H / 4
-    c1w=18*mm; c2w=30*mm; c3w=14*mm; c4w=META_W-c1w-c2w-c3w
+    # Metadata grid: 4 columns — label1 | value1 | label2 | value2
+    # Fixed compact widths so nothing stretches to page edge
+    RX  = ML + LOGO_W + TITLE_W
+    rh  = HDR_H / 4
+    c1w = 20*mm   # label col 1  (SOP No., Rev No., Unit, Sub Area)
+    c3w = 16*mm   # label col 2  (Page, Date, Area, Zone)
+    c2w = (META_W - c1w - c3w) / 2   # value col 1
+    c4w = META_W - c1w - c2w - c3w   # value col 2
     meta_rows = [
         ("SOP No.", meta["sop_no"],  "Page",    meta["page_info"]),
         ("Rev No.", meta["rev_no"],  "Date",    meta["date"]),
@@ -665,7 +669,6 @@ def generate_pdf(steps, meta):
             c.setFillColor(colors.HexColor("#D6E8F7") if is_lbl else colors.white)
             c.setStrokeColor(colors.black); c.setLineWidth(0.35)
             c.rect(xs[ci], ry, cw, rh, fill=1, stroke=1); c.setFillColor(colors.black)
-            # ── UPDATED: font size 11 for all header metadata cells ───────────
             draw_ltext(c, txt, xs[ci]+2, ry+rh/2, cw-3,
                        "Helvetica-Bold" if is_lbl else "Helvetica", 11)
     cur_y = hdr_bot - GAP1
